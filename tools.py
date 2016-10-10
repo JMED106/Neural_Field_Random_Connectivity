@@ -187,7 +187,7 @@ class SaveResults:
         self.results = dict(parameters=dict(), connectivity=dict)
         # Parameters are store copying the configuration dictionary and other useful parameters (from the beginning)
         self.results['parameters'] = {'l': self.d.l, 'eta0': self.d.eta0, 'delta': self.d.delta, 'j0': self.d.j0,
-                                      'tau': self.d.faketau, 'opts': parameters}
+                                      'tau': self.d.faketau, 'args': parameters}
         self.results['connectivity'] = {'type': cnt.profile, 'cnt': cnt.cnt, 'modes': cnt.modes, 'freqs': cnt.freqs}
         self.results['perturbation'] = {'t0': pert.t0}
         if cnt.profile == 'mex-hat':

@@ -3,47 +3,123 @@
 ###################################################
 # General options, default values (can be overridden by command line options)
 #̣ ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
-# This file location
-- f: "./conf.txt"
-# spatial mode of the 
-  m: 1
-# amplitude of perturbation
-  a: 0.0001
-# 'qif' or 'nf' or both system to be simulated
-  s: 'both'
-# Type of connectivity to be used ('mex-hat', 'fs' fourier series, etc.)
-  c: 'fs'
-# Number of neurons for the qif system
-  N: 200000
-# Number of populations ("l" in the program)
-  n: 100
-# External current (eta)
-  e: -2.0
-# Width of external current distibution (delta)
-  d: 1.0
-# Total time of simulation (in dt time, a.u.)
-  t: 200
-# Distribution of external currents for qif system ('lorentz', 'gauss', 'noise': non-distributed but GWN)
-  D: 'lorentz'
-
-# Extra options:
-# ¯¯¯¯¯¯¯¯¯¯¯¯¯¯
-# Override initial conditions generator
-- ic: False
-# Time step
-  dt: 1E-3
-# Initial time
-  t0: 0.0
-# Time constant (to be applied after computations are done, faketau)
-  ftau: 20.0E-3
-# Modes of connectivity
-  modes: [0, 38, 32, 0]
-
-# Extra options for perturbation
-# ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
-# Duration:
-- dt: 0.5
-# Attack (instantaneous, exponential, ...)
-  attack: 'exponential'
-# Release (instantaneous, exponential, ...)
-  release: 'instantaneous'
+# Perturbation options
+Perturbation:
+  -m --mode:
+    description: "Spatial mode of the perturbation."
+    default:     1
+    name:        "<mode>"
+    choices:     ~
+  -a --amplitude:
+    description: "Amplitude of the perturbation."
+    default:     0.00001
+    name:        "<amplitude>"
+    choices:     ~
+  -pt --pulseDt:
+    description: "Duration of the pulse (a.u.)"
+    default:     0.5
+    name:        "<pdt>"
+    choices:     ~
+  -A --attack:
+    description: "Pulse attack function."
+    default:     'exponential'
+    name:        "<attack>"
+    choices:     ['exponential', 'instantaneous']
+  -R --release:
+    description: "Pulse release function."
+    default:     'exponential'
+    name:        "<release>"
+    choices:     ['exponential', 'instantaneous']
+QIF:
+  -e --eta:
+    description: "External current."
+    default:     -4.0
+    name:        "<eta>"
+    choices:     ~
+  -tm --taum:
+    description: "Time constant (to be applied after computations are done, faketau) (s)."
+    default:     !!float 20.0E-3
+    name:        "<taum>"
+    choices:     ~
+  -td --taud:
+    description: "Synaptic time constant (a.u.)."
+    default:     100.0
+    name:        "<taud>"
+    choices:     ~
+  -ti --taui:
+    description: "Synaptic time constant (a.u.)."
+    default:     10.0
+    name:        "<tauin>"
+    choices:     ~
+  -U --fast:
+    description: "Synaptic fast time constant (a.u.)."
+    default:     0.05
+    name:        "<fast>"
+    choices:     ~
+Network:
+  -j --coupling:
+    description: "Synaptic coupling strength."
+    default:     38.0
+    name:        "<j0>"
+    choices:     ~
+  -jk --modes:
+    description: "Modes of connectivity."
+    default:     [0, 38, 32, 0]
+    name:        "<[jk]>"
+    choices:     ~
+  -N --popsize:
+    description: "Number of neurons for the qif system."
+    default:     200000
+    name:        "<N>"
+    choices:     ~
+  -n --nodes:
+    description: "Number of nodes in the network."
+    default:     100
+    name:        "<n>"
+    choices:     ~
+  -D --distribution:
+    description: "Distribution of external currents for the qif system ('lorentz', 'gauss', 'noise': non-distributed but under GWN)"
+    default:     'lorentz'
+    name:        "<distribution>"
+    choices:     ['lorentz', 'gauss', 'noise']
+  -d --delta:
+    description: "Width of the external current distibution."
+    default:     1.0
+    name:        "<delta>"
+    choices:     ~
+Simulation:
+  -f --file:
+    description: "Configuration file."
+    default:     "./conf.txt"
+    name:        "<conf file>"
+    choices:     ~
+  -ic --initconds:
+    description: "Override initial conditions generator."
+    default:     False
+    name:        "<initconds>"
+    choices:     [False ,True]
+  -oic --overrideic:
+    description: "Override initial conditions generator."
+    default:     False
+    name:        "<overinitconds>"
+    choices:     [True ,False]
+  -s --system:
+    description: "Systems to be simulated."
+    default:     'both'
+    name:        "<system>"
+    choices:     ['qif', 'fr', 'both']
+  -T --ttime:
+    description: "Total time of simulation (in dt time, a.u.)."
+    default:     200.0
+    name:        "<time>"
+    choices:     ~
+  -dt --timestep:
+    description: "Time step (a.u.)."
+    default:     1E-3
+    name:        "<dt>"
+    choices:     ~
+  -t0 --inittime:
+    description: "Initial time (a.u.)."
+    default:     0.0
+    name:        "<t0>"
+    choices:     ~

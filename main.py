@@ -1,90 +1,81 @@
-import Gnuplot
-import getopt
+#!/usr/bin/python2.7
+
+import argparse
+import yaml
 import sys
 from timeit import default_timer as timer
+import progressbar as pb
+import Gnuplot
 
 import numpy as np
-from numpy import pi
-import progressbar as pb
-import yaml
-
-from nflib import Data, Connectivity, FiringRate
-from tools import Perturbation, qifint, qifint_noise, noise, SaveResults, TheoreticalComputations, DictToObj
+from nflib import Data, FiringRate, Connectivity
+from tools import qifint, qifint_noise, TheoreticalComputations, SaveResults, Perturbation, noise
 
 __author__ = 'jm'
 
 
-def main(argv, options):
-    try:
-        optis, args = getopt.getopt(argv, "hm:a:s:c:N:n:e:d:t:D:f:",
-                                    ["mode=", "amp=", "system=", "connec=", "neurons=", "lenght=", "extcurr=",
-                                     "delta=", "tfinal=", "Distr=", "file="])
-    except getopt.GetoptError:
-        print 'main.py [-m <mode> -a <amplitude> -s <system> -c <connectivity> ' \
-              '-N <number-of-neurons> -n <lenght-of-ring-e <external-current> ' \
-              '-d <widt-of-dist> -t <final-t> -D <type-of-distr> -f <config-file>]'
-        sys.exit(2)
-
-    for opt, arg in optis:
-        if len(opt) > 2:
-            opt = opt[1:3]
-        opt = opt[1]
-        # Check type and cast
-        if isinstance(options[opt], int):
-            options[opt] = int(float(arg))
-        elif isinstance(options[opt], float):
-            options[opt] = float(arg)
-        else:
-            options[opt] = arg
-
-    return options
+# Empty class to manage external parameters
+# noinspection PyClassHasNoInit
+class Options:
+    pass
 
 
-opts = {"m": 0, "a": 1.0, "s": 'both', "c": 'mex-hat',
-        "N": int(2E5), "n": 100, "e": 4.0, "d": 0.5, "t": 20,
-        "D": 'lorentz', "f": "conf.txt"}
-extopts = {"dt": 1E-3, "t0": 0.0, "ftau": 20.0E-3, "modes": [10, 7.5, -2.5]}
-pertopts = {"dt": 0.5, "attack": 'exponential', "release": 'instantaneous'}
+options = None
+ops = Options()
+pi = np.pi
+pi2 = np.pi * np.pi
 
-if __name__ == '__main__':
-    opts2 = main(sys.argv[1:], opts)
-else:
-    opts2 = opts
+# We first try to parse optional configuration files:
+fparser = argparse.ArgumentParser(add_help=False)
+fparser.add_argument('-f', '--file', default="conf.txt", dest='-f', metavar='<file>')
+farg = fparser.parse_known_args()
+conffile = vars(farg[0])['-f']
+
+# We open the configuration file to load parameters (not optional)
 try:
-    (opts, extopts, pertopts) = yaml.load(file(opts2['f']))
-    if __name__ == '__main__':
-        opts = main(sys.argv[1:], opts)
+    options = yaml.load(file(conffile, 'rstored'))
 except IOError:
-    print "The configuration file %s is missing, using inbuilt configuration." % (opts2['f'])
-except ValueError:
-    print "Configuration file has bad format."
+    print "The configuration file '%s' is missing" % conffile
+    exit(-1)
+except yaml.YAMLError, exc:
+    print "Error in configuration file:", exc
     exit(-1)
 
-print opts
-# Gather all parameters in a single dictionary (for saving)
-parameters = {'opts': opts, 'extopts': extopts, 'pertopts': pertopts}
-# Convert them to dictionaries for easier access
-opts = DictToObj(opts)
-extopts = DictToObj(extopts)
-pertopts = DictToObj(pertopts)
+# We load parameters from the dictionary of the conf file and add command line options (2nd parsing)
+parser = argparse.ArgumentParser(
+    description='Simulator of a network of ensembles of all-to-all QIF neurons.',
+    usage='python %s [-O <options>]' % sys.argv[0])
+
+for group in options:
+    gr = parser.add_argument_group(group)
+    for key in options[group]:
+        flags = key.split()
+        args = options[group]
+        gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
+                        metavar=args[key]['name'], type=type(args[key]['default']),
+                        choices=args[key]['choices'])
+
+# We parse command line arguments:
+opts = parser.parse_args(farg[1])
+args = parser.parse_args(farg[1], namespace=ops)
 
 ###################################################################################
 # 0) PREPARE FOR CALCULATIONS
 # 0.1) Load data object:
-d = Data(l=opts.n, N=opts.N, eta0=opts.e, delta=opts.d, tfinal=opts.t, system=opts.s, fp=opts.D)
+d = Data(l=args.n, N=args.N, eta0=args.e, delta=args.d, tfinal=args.t, system=args.s, fp=args.D)
 
 # 0.2) Create connectivity matrix and extract eigenmodes
-c = Connectivity(d.l, profile=opts.c, fsmodes=extopts.modes, amplitude=10.0, data=d)
+c = Connectivity(d.l, profile=args.c, fsmodes=args.modes, amplitude=10.0, data=d)
 print "Modes: ", c.modes
 
 # 0.3) Load initial conditions
 d.load_ic(c.modes[0], system=d.system)
 # Override initial conditions generator:
-if opts.a != 0.0:
-    extopts.ic = False
+if args.a != 0.0:
+    args.ic = False
 else:
-    extopts.ic = True
-if extopts.ic:
+    args.ic = True
+if args.ic:
     print "Overriding initial conditions."
     d.new_ic = True
 
@@ -93,10 +84,10 @@ if d.system != 'nf':
     fr = FiringRate(data=d, swindow=0.5, sampling=0.05)
 
 # 0.5) Set perturbation configuration
-p = Perturbation(data=d, dt=pertopts.dt, modes=[int(opts.m)], amplitude=float(opts.a), attack=pertopts.attack)
+p = Perturbation(data=d, dt=args.dt, modes=[int(args.m)], amplitude=float(args.a), attack=args.attack)
 
 # 0.6) Define saving paths:
-sr = SaveResults(data=d, cnt=c, pert=p, system=d.system, parameters=parameters)
+sr = SaveResults(data=d, cnt=c, pert=p, system=d.system, parameters=opts)
 
 # 0.7) Other theoretical tools:
 th = TheoreticalComputations(d, c, p)
@@ -172,11 +163,10 @@ while temps < d.tfinal:
     if d.system == 'nf' or d.system == 'both':
         # We compute the Mean-field vector S ( 1.0/(2.0*pi)*dx = 1.0/l )
         d.sphi[kp] = (1.0 / d.l) * np.dot(c.cnt, d.r[k])
-        d.d[kp] = d.d[k] + d.dt * ((1.0 - d.d[k]) / d.taud - d.u * d.r[k] * d.d[k])
-
         # -- Integration -- #
         d.r[kp] = d.r[k] + d.dt * (d.delta / pi + 2.0 * d.r[k] * d.v[k])
-        d.v[kp] = d.v[k] + d.dt * (d.v[k] * d.v[k] + d.eta0 + d.sphi[kp] * d.d[kp] - pi * pi * d.r[k] * d.r[k] + p.input)
+        d.v[kp] = d.v[k] + d.dt * (
+            d.v[k] * d.v[k] + d.eta0 + d.sphi[kp] * d.d[kp] - pi * pi * d.r[k] * d.r[k] + p.input)
 
     # Perturbation at certain time
     if int(p.t0 / d.dt) == tstep:
@@ -222,7 +212,7 @@ sr.save()
 # Preliminar plotting with gnuplot
 gp = Gnuplot.Gnuplot(persist=1)
 p1 = Gnuplot.PlotItems.Data(np.c_[d.tpoints * d.faketau, d.r[:, d.l / 2] / d.faketau], with_='lines')
-if opts.s != 'nf':
+if args.s != 'nf':
     p2 = Gnuplot.PlotItems.Data(np.c_[np.array(fr.tempsfr) * d.faketau, np.array(fr.r)[:, d.l / 2] / d.faketau],
                                 with_='lines')
 else:
