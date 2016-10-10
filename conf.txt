@@ -1,0 +1,49 @@
+###################################################
+# Config file: system parameters and architecture #
+###################################################
+# General options, default values (can be overridden by command line options)
+#̣ ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
+# This file location
+- f: "./conf.txt"
+# spatial mode of the 
+  m: 1
+# amplitude of perturbation
+  a: 0.0001
+# 'qif' or 'nf' or both system to be simulated
+  s: 'both'
+# Type of connectivity to be used ('mex-hat', 'fs' fourier series, etc.)
+  c: 'fs'
+# Number of neurons for the qif system
+  N: 200000
+# Number of populations ("l" in the program)
+  n: 100
+# External current (eta)
+  e: -2.0
+# Width of external current distibution (delta)
+  d: 1.0
+# Total time of simulation (in dt time, a.u.)
+  t: 200
+# Distribution of external currents for qif system ('lorentz', 'gauss', 'noise': non-distributed but GWN)
+  D: 'lorentz'
+
+# Extra options:
+# ¯¯¯¯¯¯¯¯¯¯¯¯¯¯
+# Override initial conditions generator
+- ic: False
+# Time step
+  dt: 1E-3
+# Initial time
+  t0: 0.0
+# Time constant (to be applied after computations are done, faketau)
+  ftau: 20.0E-3
+# Modes of connectivity
+  modes: [0, 38, 32, 0]
+
+# Extra options for perturbation
+# ¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯¯
+# Duration:
+- dt: 0.5
+# Attack (instantaneous, exponential, ...)
+  attack: 'exponential'
+# Release (instantaneous, exponential, ...)
+  release: 'instantaneous'
