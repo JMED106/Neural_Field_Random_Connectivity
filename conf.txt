@@ -7,22 +7,27 @@
 Perturbation:
   -m --mode:
     description: "Spatial mode of the perturbation."
-    default:     1
+    default:     !!int 1
     name:        "<mode>"
     choices:     ~
   -a --amplitude:
     description: "Amplitude of the perturbation."
-    default:     0.00001
+    default:     1.0
     name:        "<amplitude>"
     choices:     ~
   -pt --pulseDt:
     description: "Duration of the pulse (a.u.)"
-    default:     0.5
+    default:     1.0
     name:        "<pdt>"
+    choices:     ~
+  -pt0 --pulset0:
+    description: "Onset of the pulse (a.u.)"
+    default:     2.5
+    name:        "<pt0>"
     choices:     ~
   -A --attack:
     description: "Pulse attack function."
-    default:     'exponential'
+    default:     'instantaneous'
     name:        "<attack>"
     choices:     ['exponential', 'instantaneous']
   -R --release:
@@ -30,10 +35,21 @@ Perturbation:
     default:     'exponential'
     name:        "<release>"
     choices:     ['exponential', 'instantaneous']
+Noise:
+  -ns --noise:
+    description: "Spatial noise boolean."
+    default:     False
+    name:        "<noise>"
+    choices:     [True, False]
+  -nD --noisediffusion:
+    description: "Spatial noise diffusion parameter."
+    default:     1.0
+    name:        "<noiseD>"
+    choices:     ~
 QIF:
   -e --eta:
     description: "External current."
-    default:     -4.0
+    default:     4.0
     name:        "<eta>"
     choices:     ~
   -tm --taum:
@@ -57,14 +73,19 @@ QIF:
     name:        "<fast>"
     choices:     ~
 Network:
+  -c --cprofile:
+    description: "Connectivity matrix style."
+    default:     'pecora1'
+    name:        "<cnt>"
+    choices:     ['uniform', 'mex-hat', 'fs', 'pecora1']
   -j --coupling:
     description: "Synaptic coupling strength."
-    default:     38.0
+    default:     10.0
     name:        "<j0>"
     choices:     ~
   -jk --modes:
     description: "Modes of connectivity."
-    default:     [0, 38, 32, 0]
+    default:     [-2.0, 1.0]
     name:        "<[jk]>"
     choices:     ~
   -N --popsize:
@@ -76,6 +97,11 @@ Network:
     description: "Number of nodes in the network."
     default:     100
     name:        "<n>"
+    choices:     ~
+  -dg --degree:
+    description: "in-degree of the network (in percentage relative to the network size)."
+    default:     0.4
+    name:        "<dg>"
     choices:     ~
   -D --distribution:
     description: "Distribution of external currents for the qif system ('lorentz', 'gauss', 'noise': non-distributed but under GWN)"
@@ -105,12 +131,12 @@ Simulation:
     choices:     [True ,False]
   -s --system:
     description: "Systems to be simulated."
-    default:     'both'
+    default:     'nf'
     name:        "<system>"
-    choices:     ['qif', 'fr', 'both']
+    choices:     ['qif', 'nf', 'both']
   -T --ttime:
     description: "Total time of simulation (in dt time, a.u.)."
-    default:     200.0
+    default:     20.0
     name:        "<time>"
     choices:     ~
   -dt --timestep:

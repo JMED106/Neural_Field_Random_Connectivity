@@ -85,7 +85,7 @@ class Perturbation:
     """ Tool to handle perturbations: time, duration, shape (attack, decay, sustain, release (ADSR), etc. """
 
     def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None,
-                 amplitude=1.0, attack='exponential', release='instantaneous'):
+                 amplitude=1.0, attack='exponential', release='instantaneous', cntmodes=None):
         if data is None:
             self.d = Data()
         else:
@@ -121,9 +121,9 @@ class Perturbation:
         self.amp = amplitude
         # Spatial modulation (wavelengths)
         self.phi = np.linspace(-np.pi, np.pi, self.d.l)
-        self.smod = self.sptprofile(modes, self.amp)
+        self.smod = self.sptprofile(modes, self.amp, cntmodes=cntmodes)
 
-    def sptprofile(self, modes, amp=1E-2):
+    def sptprofile(self, modes, amp=1E-2, cntmodes=None):
         """ Gives the spatial profile of the perturbation: different wavelength and combinations
             of them can be produced.
         """
@@ -132,7 +132,10 @@ class Perturbation:
             print "Warning! 'modes' should be an iterable."
             modes = [modes]
         for m in modes:
-            sprofile += amp * np.cos(m * self.phi)
+            if cntmodes is None:
+                sprofile += amp * np.cos(m * self.phi)
+            else:
+                sprofile += amp * cntmodes[m]
         return sprofile
 
     def timeevo(self, temps):
@@ -153,8 +156,8 @@ class Perturbation:
                     self.tdmod = self.trmod
                     self.input = (self.trmod - self.trmod0) * self.smod
                 elif self.attack == 'instantaneous':
-                    if temps == self.t0:
-                        self.input = self.amp
+                    if temps >= self.t0:
+                        self.input = self.amp * self.smod
         elif self.ptype == 'oscillatory':
             pass
 

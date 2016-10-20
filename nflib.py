@@ -4,6 +4,11 @@ from scipy import stats, special
 from scipy.fftpack import dct
 from scipy.optimize import fsolve
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 __author__ = 'Jose M. Esnaola Acebes'
 
 """ This file contains classes and functions to be used in the Neural Field simulation.
@@ -34,14 +39,14 @@ class Data:
         and perform modifications of this data in case it is necessary.
     """
 
-    def __init__(self, l=100, N=1E5, eta0=0, delta=1.0, t0=0.0, tfinal=50.0,
+    def __init__(self, l=100, n=1E5, eta0=0, j0=0.0, delta=1.0, t0=0.0, tfinal=50.0,
                  dt=1E-3, delay=0.0, tau=1.0, faketau=20.0E-3, fp='lorentz', system='nf'):
 
         # 0.1) Network properties:
         self.l = l
         self.dx = 2.0 * np.pi / np.float(l)
         # Zeroth mode, determines firing rate of the homogeneous state
-        self.j0 = 0.0  # default value
+        self.j0 = j0  # default value
 
         # 0.3) Give the model parameters
         self.eta0 = eta0  # Constant external current mean value
@@ -68,7 +73,7 @@ class Data:
         self.v = np.ones((self.nsteps, l)) * (-0.01)
         self.d = np.ones((self.nsteps, l))
         self.sphi = np.ones((self.nsteps, l))
-        self.r[len(self.r) - 1, :] = 0.0
+        self.r[len(self.r) - 1, :] = 0.1
         # Load INITIAL CONDITIONS
         self.sphi[len(self.sphi) - 1] = 0.0
         self.d[len(self.d) - 1, :] = 0.0
@@ -86,14 +91,14 @@ class Data:
             print "***********************"
             self.fp = fp
             # sub-populations
-            self.N = N
+            self.N = n
             # Excitatory and inhibitory populations
             self.neni = 0.5
 
             # sub-populations
-            self.dN = int(np.float(N) / np.float(l))
-            if self.dN * l != N:
-                print('Warning: N, l not dividable')
+            self.dN = int(np.float(n) / np.float(l))
+            if self.dN * l != n:
+                print('Warning: n, l not dividable')
 
             self.vpeak = 100.0  # Value of peak voltage (max voltage)
             # self.vreset = -self.vpeak  # Value of resetting voltage (min voltage)
@@ -141,6 +146,7 @@ class Data:
                 del eta_pop_e
             elif fp == 'noise':
                 print "+ Setting homogeneous population of neurons (identical), under GWN."
+                self.eta = np.ones(self.N) * self.eta0
             else:
                 print "This distribution is not implemented, yet."
                 exit(-1)
@@ -317,7 +323,7 @@ class Connectivity:
     """
 
     def __init__(self, length=500, profile='mex-hat', amplitude=1.0, me=50, mi=5, j0=0.0,
-                 refmode=None, refamp=None, fsmodes=None, data=None):
+                 refmode=None, refamp=None, fsmodes=None, data=None, degree=None, saved=True):
         """ In order to extract properties some parameters are needed: they can be
             called separately.
         """
@@ -355,13 +361,37 @@ class Connectivity:
             self.cnt = self.jcntvty(fsmodes, coords=ij)
             # TODO: separate excitatory and inhibitory connectivity
             self.modes = fsmodes
+        elif profile == 'uniform':
+            aij = None
+            if saved:
+                try:
+                    aij = np.load("cnt.npy")
+                    np.reshape(aij, (length, length))
+                except (IOError, ValueError) as e:
+                    logger.error(e)
+                    aij = self.uniform_in_degree(length, degree)
+            self.cnt = data.j0 * aij
+            logger.info("Connectivity matrix:\n%s" % str(self.cnt))
+            # For Hermitian matrices self.modes = np.linalg.eigh(self.cnt)
+            self.modes = np.linalg.eigh(self.cnt)
+        elif profile == 'pecora1':
+            fsmodes = np.array(fsmodes)*data.j0
+            jc = fsmodes[1]
+            jr = fsmodes[0]
+            self.cnt, self.modes =  self.pecora1998_ex1(length, jc, jr, eta=data.eta0, delta=data.delta)
+            self.eigenmodes = self.modes[0]
+            self.eigenvectors= self.modes[1]
+            print self.cnt
+            # print self.modes
         del ij
 
         # Compute frequencies for the ring model (if data is provided)
-        if data is not None:
-            self.freqs = self.frequencies(self.modes, data)
-        else:
-            self.freqs = None
+        if data is not None and profile in ('mex-hat', 'fs'):
+            self.freqs = self.frequencies(self.modes[0], data)
+        elif profile in 'pecora1':
+            self.freqs = self.frequencies(fsmodes, data, type='pecora', n=length, alpha=data.j0)
+            print  np.argmin(self.freqs), np.argmax(self.freqs)
+            print self.freqs[2]/data.faketau, self.freqs[51]/data.faketau
 
     def searchmode(self, mode, amp, me, mi):
         """ Function that creates a Mex-Hat connectivity with a specific amplitude (amp) in a given mode (mode)
@@ -399,7 +429,7 @@ class Connectivity:
         return je, me, ji, mi
 
     @staticmethod
-    def frequencies(modes, data=None, eta=None, tau=None, delta=None, r0=None):
+    def frequencies(modes, data=None, eta=None, tau=None, delta=None, r0=None, type='ring-all', alpha=0.0, n=100):
         """ Function that computes frequencies of decaying oscillations at the homogeneous state
         :param modes: array of modes, ordered from 0 to maximum wavenumber. If only zeroth mode is passed,
                       then it should be passed as an array. E.g. [1.0]. (J_0 = 1.0).
@@ -416,23 +446,32 @@ class Connectivity:
             eta = data.eta0
             tau = data.tau
             delta = data.delta
+            j0 = data.j0
         # If not:
         elif (eta is None) or (tau is None) or (delta is None):
             print 'Not enough data to compute frequencies'
             return None
         if r0 is None:  # We have to compute the firing rate at the stationary state
-            r0 = Connectivity.rtheory(modes[0], eta, delta)
+            if type == 'pecora':
+                r0 = Connectivity.rtheory(0, eta, delta)[0]
+                logger.info("r0: %f" % r0)
+            else:
+                r0 = Connectivity.rtheory(modes[0], eta, delta)
         r0u = r0 / tau
         f = []
-        for k, m in enumerate(modes):
-            if m / (2 * np.pi ** 2 * tau * r0u) <= 1:
-                f.append(r0u * np.sqrt(1.0 - m / (2 * np.pi ** 2 * tau * r0u)))
-            else:
-                f.append(r0u * np.sqrt(m / (2 * np.pi ** 2 * tau * r0u) - 1.0))
-                print "Fixed point is above the Saddle Node bifurcation for k = %d: there are not " \
-                      "decaying oscillations for the homogeneous state." % k
-                print "These values plus the one corresponding to the decay are now the actual decays of overdamped " \
-                      "oscillations."
+        if type == 'ring-all':
+            for k, m in enumerate(modes):
+                if m / (2 * np.pi ** 2 * tau * r0u) <= 1:
+                    f.append(r0u * np.sqrt(1.0 - m / (2 * np.pi ** 2 * tau * r0u)))
+                else:
+                    f.append(r0u * np.sqrt(m / (2 * np.pi ** 2 * tau * r0u) - 1.0))
+                    print "Fixed point is above the Saddle Node bifurcation for k = %d: there are not " \
+                          "decaying oscillations for the homogeneous state." % k
+                    print "These values plus the one corresponding to the decay are now the actual decays of overdamped " \
+                          "oscillations."
+        elif type == 'pecora':
+            for k in xrange(n):
+                f.append(r0 * np.sqrt(1.0 + 2 * alpha * (np.sin(np.pi * k / n))**2 / (r0 * np.pi**2)))
         return f
 
     @staticmethod
@@ -510,6 +549,85 @@ class Connectivity:
     def linresponse(self):
         # TODO Linear Response (may be is better to do this in the perturbation class)
         pass
+
+    @staticmethod
+    def uniform_in_degree(n, degree, symmetric=True, balanced=True, min=-5, max=5):
+        """ Function to generate a random connectivity matrix (adjacency matrix, Aij)
+        :param n: number of nodes
+        :param degree: in-degree (d^n) of the nodes
+        :param symmetric: symmetric connectivity (bidirectional), by default is True.
+        :param balanced: balanced network, overall connectivity is 0 for every node. By default is True.
+        :param min: minimum connectivity weight (can be negative)
+        :param max: maximum connectivity weight.
+        """
+        aij = np.zeros((n, n))
+        # Number of non-zero values
+        d_n = int(n * degree) - 1
+
+        # Vector containing the values of connectivity (ordered by amplitude)
+        if balanced:
+            a0 = np.linspace(-max, max, d_n)  # Non-zero values
+        else:
+            a0 = (max - min) * np.random.rand(d_n) + min
+            # noinspection PyUnresolvedReferences
+            logger.info('The overall input is: %f' % np.add.reduce(a0))
+
+        a0 = np.concatenate((a0, np.zeros(n - d_n)))  # We complete using zeros
+        np.random.shuffle(a0)  # Shuffle the vector
+        # We look for a zero value and take the first argument
+        zerosargs = np.ma.where(a0 == 0.0)
+        argzero = zerosargs[0][0]
+        a0 = np.roll(a0, -argzero)
+        print  a0
+
+        w = range(n)
+
+        for i in xrange(n):
+            if symmetric:
+                aij[i] = np.roll(a0, (-1) ** (n) * (-i))
+                if i % 2 != 0:
+                    aij[i] = np.flipud(aij[i])
+            else:
+                aij[i] = np.roll(a0, w.pop(np.random.randint(len(w))))
+        np.save("cnt", aij)
+        return aij
+
+    def pecora1998_ex1(self, n, jc, jr=0, eta=0.0, delta=1.0):
+        """ Connectivity matrix of a ring (periodic boundaries) with only first neighbours connections (jc) and
+            recurrent connectivity (jr).
+            " ... --> 0 <-- Jc --> 0 <-- Jc --> 0 <-- Jc --> 0 <-- ...
+                    /Jr \        /Jr \        /Jr \        /Jr \
+                    `->-'        `->-'        `->-'        `->-'
+            See Pecora, PRE, 58,1. 1998
+        """
+        aij = np.zeros((n, n))
+        aij[0, 0] = jr
+        aij[0, 1] = jc
+        aij[0, -1] = jc
+        for i in xrange(1, n):
+            aij[i] = np.roll(aij[0], i)
+
+        # Compute eigenmodes and eigenvalues
+        r0 = self.rtheory(jr, eta, delta)[0]
+        # r02 = 1.0 / np.sqrt(np.pi**2*2.0) * np.sqrt(eta + np.sqrt(eta**2 + 1.0))
+        v0 = -1.0/(2*np.pi*r0)
+        J =  np.array([[2*v0, 2*r0], [-2.0*np.pi**2*r0 + jr*r0, 2*v0]])
+        E = np.array([[0, 0], [jc, 0]])
+        eigenvalues = []
+        eigenvectors = []
+
+        for k in xrange(n):
+            gammak = -4.0*(np.sin(np.pi * k / n))**2
+            A = J + E*gammak
+            eigen = np.linalg.eig(A)
+            for lmbd, vect in zip(eigen[0], eigen[1]):
+                if np.isreal(vect[0]):
+                    eigenvalues.append(lmbd)
+            j = np.exp(2.0*np.pi*1.0j*np.arange(1,n+1)*k/n)
+            # noinspection PyUnresolvedReferences
+            eigenvectors.append(np.real((1.0/n)*np.add.reduce(np.diag(np.ones(n))*j, axis=0)))
+
+        return  aij, (eigenvalues, eigenvectors)
 
 
 class FiringRate:

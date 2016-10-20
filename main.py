@@ -11,6 +11,11 @@ import numpy as np
 from nflib import Data, FiringRate, Connectivity
 from tools import qifint, qifint_noise, TheoreticalComputations, SaveResults, Perturbation, noise
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 __author__ = 'jm'
 
 
@@ -62,21 +67,19 @@ args = parser.parse_args(farg[1], namespace=ops)
 ###################################################################################
 # 0) PREPARE FOR CALCULATIONS
 # 0.1) Load data object:
-d = Data(l=args.n, N=args.N, eta0=args.e, delta=args.d, tfinal=args.t, system=args.s, fp=args.D)
+d = Data(l=args.n, n=args.N, eta0=args.e, j0=args.j, delta=args.d, tfinal=args.T, system=args.s, fp=args.D)
 
 # 0.2) Create connectivity matrix and extract eigenmodes
-c = Connectivity(d.l, profile=args.c, fsmodes=args.modes, amplitude=10.0, data=d)
-print "Modes: ", c.modes
+c = Connectivity(d.l, profile=args.c, fsmodes=args.jk, amplitude=10.0, data=d, degree=args.dg, saved=True)
 
 # 0.3) Load initial conditions
-d.load_ic(c.modes[0], system=d.system)
-# Override initial conditions generator:
-if args.a != 0.0:
-    args.ic = False
+if args.oic is False:
+    d.load_ic(0.0, system=d.system)
 else:
-    args.ic = True
+    # Override initial conditions generator:
+    pass
 if args.ic:
-    print "Overriding initial conditions."
+    print "Forcing initial conditions generation..."
     d.new_ic = True
 
 # 0.4) Load Firing rate class in case qif network is simulated
@@ -84,7 +87,8 @@ if d.system != 'nf':
     fr = FiringRate(data=d, swindow=0.5, sampling=0.05)
 
 # 0.5) Set perturbation configuration
-p = Perturbation(data=d, dt=args.dt, modes=[int(args.m)], amplitude=float(args.a), attack=args.attack)
+p = Perturbation(data=d, dt=args.pt, modes=args.m, amplitude=float(args.a), attack=args.A, cntmodes=c.modes[1],
+                 t0=args.pt0)
 
 # 0.6) Define saving paths:
 sr = SaveResults(data=d, cnt=c, pert=p, system=d.system, parameters=opts)
@@ -103,7 +107,9 @@ pbar = pb.ProgressBar(widgets=widgets, maxval=10 * (d.nsteps + 1)).start()
 time1 = timer()
 tstep = 0
 temps = 0
-kp = 0
+nois = 0.0
+noiseinput = 0.0
+kp = k = 0
 
 # Time loop
 while temps < d.tfinal:
@@ -114,7 +120,9 @@ while temps < d.tfinal:
     if p.pbool and not d.new_ic:
         if temps >= p.t0:
             p.timeevo(temps)
-    p.it[kp, :] = p.input
+    if args.ns and not d.new_ic:
+        nois = np.sqrt(2.0 * args.nD) * np.random.randn(d.l)
+    p.it[kp, :] = p.input + d.tau / d.dt * noise
 
     # ######################## -  INTEGRATION  - ##
     # ######################## -      qif      - ##
@@ -127,17 +135,10 @@ while temps < d.tfinal:
 
         if d.fp == 'noise':
             noiseinput = np.sqrt(2.0 * d.dt / d.tau * d.delta) * noise(d.N)
-            # Excitatory
-            d.matrix = qifint_noise(d.matrix, d.matrix[:, 0], d.matrix[:, 1], d.eta0, s + p.input,
-                                    noiseinput, temps, d.N,
-                                    d.dN, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
-        else:
-            # Excitatory
-            d.matrix = qifint(d.matrix, d.matrix[:, 0], d.matrix[:, 1], d.eta, s + p.input, temps, d.N,
-                              d.dN, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
+        d.matrix = qifint(d.matrix, d.matrix[:, 0], d.matrix[:, 1], d.eta, s + p.input + d.tau / d.dt * noiseinput,
+                          temps, d.N, d.dN, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
 
         # Prepare spike matrices for Mean-Field computation and firing rate measure
-        # Excitatory
         d.spikes_mod[:, tsk] = 1 * d.matrix[:, 2]  # We store the spikes
         d.spikes[:, tsyp] = 1 * d.spikes_mod[:, tskp]
 
@@ -218,3 +219,5 @@ if args.s != 'nf':
 else:
     p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints * d.faketau, p.it[:, d.l / 2] + d.r0 / d.faketau], with_='lines')
 gp.plot(p1, p2)
+
+np.savetxt("p%d.dat" % args.m, np.c_[d.tpoints * d.faketau, d.r[:, d.l / 2] / d.faketau])
