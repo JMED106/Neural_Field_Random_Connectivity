@@ -7,7 +7,8 @@
 Perturbation:
   -m --mode:
     description: "Spatial mode of the perturbation."
-    default:     !!int 1
+    # default:     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    default:     [1]
     name:        "<mode>"
     choices:     ~
   -a --amplitude:
@@ -85,7 +86,7 @@ Network:
     choices:     ~
   -jk --modes:
     description: "Modes of connectivity."
-    default:     [-2.0, 1.0]
+    default:     [0, 10.0]
     name:        "<[jk]>"
     choices:     ~
   -N --popsize:
@@ -95,7 +96,7 @@ Network:
     choices:     ~
   -n --nodes:
     description: "Number of nodes in the network."
-    default:     100
+    default:     4
     name:        "<n>"
     choices:     ~
   -dg --degree:
@@ -128,7 +129,7 @@ Simulation:
     description: "Override initial conditions generator."
     default:     False
     name:        "<overinitconds>"
-    choices:     [True ,False]
+    choices:     [True, False]
   -s --system:
     description: "Systems to be simulated."
     default:     'nf'

@@ -3,6 +3,9 @@ import os
 
 import numba
 import numpy as np
+from scipy.fftpack import fft
+from scipy.signal import argrelextrema, welch
+import matplotlib.pyplot as plt
 
 from nflib import Data, Connectivity
 
@@ -103,6 +106,7 @@ class Perturbation:
 
         # Time parameters
         self.t0 = t0
+        self.t0step = int(t0 / self.d.dt)
         self.dt = dt
         self.tf = t0 + dt
         # Rise variables (attack) and parameters
@@ -191,7 +195,8 @@ class SaveResults:
         # Parameters are store copying the configuration dictionary and other useful parameters (from the beginning)
         self.results['parameters'] = {'l': self.d.l, 'eta0': self.d.eta0, 'delta': self.d.delta, 'j0': self.d.j0,
                                       'tau': self.d.faketau, 'args': parameters}
-        self.results['connectivity'] = {'type': cnt.profile, 'cnt': cnt.cnt, 'modes': cnt.modes, 'freqs': cnt.freqs}
+        self.results['connectivity'] = {'type': cnt.profile, 'cnt': cnt.cnt, 'eigenmodes': cnt.eigenmodes,
+                                        'eigenvectors': cnt.eigenvectors, 'freqs': cnt.freqs}
         self.results['perturbation'] = {'t0': pert.t0}
         if cnt.profile == 'mex-hat':
             self.results['connectivity']['je'] = cnt.je
@@ -218,7 +223,7 @@ class SaveResults:
                 self.results[system]['fr']['ts'] = {'p%s' % str(phi0): self.d.rstored[system][:, phi0] for phi0 in
                                                     list(dict(kwargs)['phi0'])}
                 self.results[system]['vstored']['ts'] = {'p%s' % str(phi0): self.d.vstored[system][:, phi0] for phi0 in
-                                                   list(dict(kwargs)['phi0'])}
+                                                         list(dict(kwargs)['phi0'])}
             if 't0' in kwargs:
                 for t0 in list(dict(kwargs)['t0']):
                     t0p, t0pid = find_nearest(self.d.t[system], t0, ret='both')
@@ -309,11 +314,13 @@ class SaveResults:
 
             def singlets(self, pop):
                 # Single populations
-                self.sp = "vstored-singlets-%d_%.2lf-%.2lf-%.2lf-%d" % (pop, self.d.j0, self.d.eta0, self.d.delta, self.d.l)
+                self.sp = "vstored-singlets-%d_%.2lf-%.2lf-%.2lf-%d" % (
+                    pop, self.d.j0, self.d.eta0, self.d.delta, self.d.l)
 
             def profile(self, t0):
                 # Profile at a given t0
-                self.pr = "vstored-profile-%.2lf_%.2lf-%.2lf-%.2lf-%d" % (t0, self.d.j0, self.d.eta0, self.d.delta, self.d.l)
+                self.pr = "vstored-profile-%.2lf_%.2lf-%.2lf-%.2lf-%d" % (
+                    t0, self.d.j0, self.d.eta0, self.d.delta, self.d.l)
 
 
 class TheoreticalComputations:
@@ -350,6 +357,68 @@ class TheoreticalComputations:
         # plt.plot(x.T[0], hr, 'rstored')
         return dict(x=r.T[0], y=rhor)
 
+
+class FrequencySpectrum:
+    """ Class containing methods for analyzing the frequency spectrum of the system.
+           + Decaying frequencies after a perturbation.
+           + Frequencies of the system under GWN.
+    """
+    def __init__(self):
+        """ Plotting parameters? Saving parameters?"""
+        pass
+
+    def analyze(self, tdata, t0, t1, tau):
+        """ This function takes all the time series and performs fft on it."""
+        # Data
+        num_points = len(tdata)
+
+        t = np.linspace(t0, t1, num_points)
+        dt = (t1 - t0) / (1.0*num_points)
+
+        # FFT data
+        tf = np.linspace(0, 1.0 / (2.0 * dt), num_points / 2)
+        yf = 2.0 / num_points * np.abs(fft(tdata)[0:num_points / 2])
+        # 70 va bastante bien
+        yf2 =  welch(tdata, fs=1.0/(tau*dt), nperseg=1024*80)
+        plt.plot(yf2[0], yf2[1])
+        plt.xlim([0, 100])
+        plt.show()
+        # exit(-1)
+        # index_peaks = np.array(argrelextrema(yf, np.greater))
+        # max_peak = np.max(yf[index_peaks])
+        # index_freqs = index_peaks[(yf[index_peaks] >= max_peak / 10.0)]
+        # freqs_rescaled = tf[index_freqs]
+        # freqs = tf[index_freqs] / tau
+
+
+        # self.plotdata(t, tdata, tf/(tau), yf)
+        pass
+        # return freqs
+
+    def freqbyhand(self, tdata, t0, t1, tau, v0=None):
+        """ Computes the frequency by detecting the maxims of amplitudes
+            in a given time series and dividing by time.
+        """
+        num_points = len(tdata)
+        t = np.linspace(t0, t1, num_points)
+        index_peaks = np.array(argrelextrema(tdata, np.greater))[0]
+        # print index_peaks
+        peaks_time = t[index_peaks]
+        # print peaks_time*tau
+        freq_rescaled = (len(peaks_time) - 1) / (peaks_time[-1] - peaks_time[0])
+        freq = freq_rescaled / tau
+        # print freq
+        return freq
+
+
+    @staticmethod
+    def plotdata(x, data, xf, dataf):
+        plt.plot(x[0:-1:100], data[0:-1:100])
+        plt.plot(x, np.log(np.abs(data - data.mean())))
+        plt.show()
+        plt.plot(xf, dataf)
+        plt.grid()
+        plt.show()
 
 class DictToObj(object):
     """Class that transforms a dictionary d into an object. Note that dictionary keys must be

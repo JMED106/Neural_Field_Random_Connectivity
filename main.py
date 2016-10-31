@@ -9,7 +9,7 @@ import Gnuplot
 
 import numpy as np
 from nflib import Data, FiringRate, Connectivity
-from tools import qifint, qifint_noise, TheoreticalComputations, SaveResults, Perturbation, noise
+from tools import qifint, TheoreticalComputations, SaveResults, Perturbation, noise, FrequencySpectrum
 
 import logging
 
@@ -87,7 +87,7 @@ if d.system != 'nf':
     fr = FiringRate(data=d, swindow=0.5, sampling=0.05)
 
 # 0.5) Set perturbation configuration
-p = Perturbation(data=d, dt=args.pt, modes=args.m, amplitude=float(args.a), attack=args.A, cntmodes=c.modes[1],
+p = Perturbation(data=d, dt=args.pt, modes=args.m, amplitude=float(args.a), attack=args.A, cntmodes=c.eigenvectors,
                  t0=args.pt0)
 
 # 0.6) Define saving paths:
@@ -95,6 +95,7 @@ sr = SaveResults(data=d, cnt=c, pert=p, system=d.system, parameters=opts)
 
 # 0.7) Other theoretical tools:
 th = TheoreticalComputations(d, c, p)
+F = FrequencySpectrum()
 
 # Progress-bar configuration
 widgets = ['Progress: ', pb.Percentage(), ' ',
@@ -111,18 +112,37 @@ nois = 0.0
 noiseinput = 0.0
 kp = k = 0
 
+tstepr = 0
+tgamma = 0
+Agamma = 0.0
+gamma = 0.0
+
 # Time loop
 while temps < d.tfinal:
     # Time step variables
     kp = tstep % d.nsteps
     k = (tstep + d.nsteps - 1) % d.nsteps
+    kbp = tstep % 2
+    kb = (tstep + 2 - 1) % 2
     # ######################## - PERTURBATION  - ##
     if p.pbool and not d.new_ic:
         if temps >= p.t0:
             p.timeevo(temps)
+            pt0step = tstep*1
     if args.ns and not d.new_ic:
-        nois = np.sqrt(2.0 * args.nD) * np.random.randn(d.l)
-    p.it[kp, :] = p.input + d.tau / d.dt * noise
+        if tstep % 1 == 0:
+            nois = np.sqrt(2.0 * d.dt/d.tau * args.nD) * np.random.randn(d.l)
+        else:
+            nois = 0.0
+    if temps >= p.t0 + p.dt:
+        # print c.freqs[1]/d.faketau
+        # exit(-1)
+        gamma = Agamma*np.sin(tgamma*1.0*c.freqs[1]*2.0*np.pi)
+        tgamma += d.dt
+    if temps >= p.t0 + p.dt + 100.0:
+        gamma = 0.0
+
+    p.it[kp, :] = p.input + d.tau / d.dt * nois + gamma*np.ones(d.l)
 
     # ######################## -  INTEGRATION  - ##
     # ######################## -      qif      - ##
@@ -163,15 +183,20 @@ while temps < d.tfinal:
     # ######################## --   FR EQS.   -- ##
     if d.system == 'nf' or d.system == 'both':
         # We compute the Mean-field vector S ( 1.0/(2.0*pi)*dx = 1.0/l )
-        d.sphi[kp] = (1.0 / d.l) * np.dot(c.cnt, d.r[k])
+        d.sphi[kbp] = (1.0 / d.l) * np.dot(c.cnt, d.r2[kb])
         # -- Integration -- #
-        d.r[kp] = d.r[k] + d.dt * (d.delta / pi + 2.0 * d.r[k] * d.v[k])
-        d.v[kp] = d.v[k] + d.dt * (
-            d.v[k] * d.v[k] + d.eta0 + d.sphi[kp] * d.d[kp] - pi * pi * d.r[k] * d.r[k] + p.input)
+        d.r2[kbp] = d.r2[kb] + d.dt * (d.delta / pi + 2.0 * d.r2[kb] * d.v[kb])
+        d.v[kbp] = d.v[kb] + d.dt * (d.v[kb]**2 + d.eta0 + d.sphi[kbp] - pi2 * d.r2[kb]**2 + p.it[kp])
+
+    if tstep % 1 == 0:
+        d.r[tstepr % d.nsteps] = d.r2[kbp]*1.0
+        tstepr += 1
 
     # Perturbation at certain time
     if int(p.t0 / d.dt) == tstep:
         p.pbool = True
+
+    # Compute the frequency by hand (for a given node, typically at the center)
 
     # Time evolution
     pbar.update(10 * tstep + 1)
@@ -186,7 +211,7 @@ print 'Total time: {}.'.format(timer() - time1)
 # Compute distribution of firing rates of neurons
 tstep -= 1
 temps -= d.dt
-th.thdist = th.theor_distrb(d.sphi[kp])
+# th.thdist = th.theor_distrb(d.sphi[kp])
 
 # Save initial conditions
 if d.new_ic:
@@ -210,7 +235,7 @@ sr.create_dict(phi0=[d.l / 2, d.l / 4, d.l / 20], t0=int(d.total_time / 10) * np
 sr.results['perturbation']['It'] = p.it
 sr.save()
 
-# Preliminar plotting with gnuplot
+# # Preliminar plotting with gnuplot
 gp = Gnuplot.Gnuplot(persist=1)
 p1 = Gnuplot.PlotItems.Data(np.c_[d.tpoints * d.faketau, d.r[:, d.l / 2] / d.faketau], with_='lines')
 if args.s != 'nf':
@@ -218,6 +243,6 @@ if args.s != 'nf':
                                 with_='lines')
 else:
     p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints * d.faketau, p.it[:, d.l / 2] + d.r0 / d.faketau], with_='lines')
-gp.plot(p1, p2)
+gp.plot(p1,p2)
 
-np.savetxt("p%d.dat" % args.m, np.c_[d.tpoints * d.faketau, d.r[:, d.l / 2] / d.faketau])
+# np.savetxt("p%d.dat" % args.m, np.c_[d.tpoints * d.faketau, d.r[:, d.l / 2] / d.faketau])

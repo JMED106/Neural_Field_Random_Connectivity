@@ -69,14 +69,16 @@ class Data:
         self.faketau = faketau  # time scale in ms
 
         # 0.7) FIRING RATE EQUATIONS
-        self.r = np.ones((self.nsteps, l))
-        self.v = np.ones((self.nsteps, l)) * (-0.01)
-        self.d = np.ones((self.nsteps, l))
-        self.sphi = np.ones((self.nsteps, l))
-        self.r[len(self.r) - 1, :] = 0.1
+        self.r = np.zeros((self.nsteps / 1, l))
+
+        self.r2 = np.ones((2, l))
+        # self.v = np.ones((self.nsteps, l)) * (-0.01)
+        self.v = np.ones((2, l)) * (-0.01)
+        # self.sphi = np.ones((self.nsteps, l))
+        self.sphi = np.ones((2, l))
+        # self.r[len(self.r) - 1, :] = 0.1
         # Load INITIAL CONDITIONS
         self.sphi[len(self.sphi) - 1] = 0.0
-        self.d[len(self.d) - 1, :] = 0.0
 
         self.system = system
         self.systems = []
@@ -204,8 +206,12 @@ class Data:
 
         if system == 'nf' or system == 'both':
             self.fileprm = '%.2lf-%.2lf-%.2lf-%d' % (j0, self.eta0, self.delta, self.l)
-            self.r[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
-            self.v[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+            if len(self.v[:, 0]) == 2:
+                self.r2[-1, :] = np.ones(self.l) * self.r0
+                self.v[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+            else:
+                self.r[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
+                self.v[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
 
         if system == 'qif' or system == 'both':
             print "Loading initial conditions ... "
@@ -353,14 +359,16 @@ class Connectivity:
                 self.mi = mi
             self.cnt = self.vonmises(self.je, me, self.ji, mi, coords=ij)
             # Compute eigenmodes
-            self.modes = self.vonmises_modes(self.je, me, self.ji, mi)
+            self.eigenmodes = self.vonmises_modes(self.je, me, self.ji, mi)
+            self.eigenvectors = None
         elif profile == 'fs':
             # Generate fourier series with modes fsmodes
             if fsmodes is None:
                 fsmodes = 10.0 * np.array([0, 1, 0.75, -0.25])  # Default values
             self.cnt = self.jcntvty(fsmodes, coords=ij)
             # TODO: separate excitatory and inhibitory connectivity
-            self.modes = fsmodes
+            self.eigenmodes = fsmodes
+            self.eigenvectors = None
         elif profile == 'uniform':
             aij = None
             if saved:
@@ -373,25 +381,23 @@ class Connectivity:
             self.cnt = data.j0 * aij
             logger.info("Connectivity matrix:\n%s" % str(self.cnt))
             # For Hermitian matrices self.modes = np.linalg.eigh(self.cnt)
-            self.modes = np.linalg.eigh(self.cnt)
+            (self.eigenmodes, self.eigenvectors) = np.linalg.eigh(self.cnt)
         elif profile == 'pecora1':
-            fsmodes = np.array(fsmodes)*data.j0
+            fsmodes = np.array(fsmodes) * data.j0
             jc = fsmodes[1]
             jr = fsmodes[0]
-            self.cnt, self.modes =  self.pecora1998_ex1(length, jc, jr, eta=data.eta0, delta=data.delta)
-            self.eigenmodes = self.modes[0]
-            self.eigenvectors= self.modes[1]
-            print self.cnt
-            # print self.modes
+            self.cnt, (self.eigenmodes, self.eigenvectors) = self.pecora1998_ex1(length, jc, jr, eta=data.eta0,
+                                                                                 delta=data.delta)
         del ij
 
         # Compute frequencies for the ring model (if data is provided)
         if data is not None and profile in ('mex-hat', 'fs'):
-            self.freqs = self.frequencies(self.modes[0], data)
+            self.freqs = self.frequencies(self.eigenmodes, data)
+            print np.array(self.freqs) / data.faketau
         elif profile in 'pecora1':
             self.freqs = self.frequencies(fsmodes, data, type='pecora', n=length, alpha=data.j0)
-            print  np.argmin(self.freqs), np.argmax(self.freqs)
-            print self.freqs[2]/data.faketau, self.freqs[51]/data.faketau
+            print self.freqs
+            np.savetxt("freqs.txt", self.freqs)
 
     def searchmode(self, mode, amp, me, mi):
         """ Function that creates a Mex-Hat connectivity with a specific amplitude (amp) in a given mode (mode)
@@ -471,7 +477,7 @@ class Connectivity:
                           "oscillations."
         elif type == 'pecora':
             for k in xrange(n):
-                f.append(r0 * np.sqrt(1.0 + 2 * alpha * (np.sin(np.pi * k / n))**2 / (r0 * np.pi**2)))
+                f.append(r0 * np.sqrt(1.0 + 2 * alpha * (np.sin(np.pi * k / n)) ** 2 / (r0 * np.pi ** 2)))
         return f
 
     @staticmethod
@@ -529,7 +535,7 @@ class Connectivity:
                 jk[i] *= np.sqrt(1.0 / (4.0 * l))
             else:
                 jk[i] *= np.sqrt(1.0 / (2.0 * l))
-        return jk[0:2 * nmodes:2]
+        return jk
 
     @staticmethod
     def vonmises_modes(je, me, ji, mi, n=20):
@@ -592,7 +598,7 @@ class Connectivity:
         np.save("cnt", aij)
         return aij
 
-    def pecora1998_ex1(self, n, jc, jr=0, eta=0.0, delta=1.0):
+    def pecora1998_ex1(self, n, jc, jr=0, eta=0.0, delta=1.0, tau=20E-3):
         """ Connectivity matrix of a ring (periodic boundaries) with only first neighbours connections (jc) and
             recurrent connectivity (jr).
             " ... --> 0 <-- Jc --> 0 <-- Jc --> 0 <-- Jc --> 0 <-- ...
@@ -601,33 +607,42 @@ class Connectivity:
             See Pecora, PRE, 58,1. 1998
         """
         aij = np.zeros((n, n))
+        aij[0, -1] = jc
         aij[0, 0] = jr
         aij[0, 1] = jc
-        aij[0, -1] = jc
+
         for i in xrange(1, n):
             aij[i] = np.roll(aij[0], i)
-
         # Compute eigenmodes and eigenvalues
-        r0 = self.rtheory(jr, eta, delta)[0]
+        r0 = self.rtheory(0.0, eta, delta)[0]
+        logger.info("Firing rate at the fix point (r*): %f" % (r0 / tau))
         # r02 = 1.0 / np.sqrt(np.pi**2*2.0) * np.sqrt(eta + np.sqrt(eta**2 + 1.0))
-        v0 = -1.0/(2*np.pi*r0)
-        J =  np.array([[2*v0, 2*r0], [-2.0*np.pi**2*r0 + jr*r0, 2*v0]])
+        v0 = -1.0 / (2 * np.pi * r0)
+        J = np.array([[2 * v0, 2 * r0], [-2.0 * np.pi ** 2 * r0, 2 * v0]])
         E = np.array([[0, 0], [jc, 0]])
         eigenvalues = []
         eigenvectors = []
-
+        # gammak = np.linalg.eigvals(aij) / jc
         for k in xrange(n):
-            gammak = -4.0*(np.sin(np.pi * k / n))**2
-            A = J + E*gammak
+            gammak = -4.0 * (np.sin(np.pi * k / n)) ** 2
+            A = J + E * gammak
             eigen = np.linalg.eig(A)
+            # logger.info(
+            #     "For %d mode:\n\t Real part of Eingenvalue 0: %f\tEigenvector 0: %s\n\t "
+            #     "Real part of Eingenvalue 1: %f\tEigenvector 1: %s" % (
+            #         k, np.imag(eigen[0][0]) / (2.0 * np.pi * tau), str(eigen[1][0]),
+            #         np.imag(eigen[0][1]) / (2.0 * np.pi * tau), str(eigen[1][1])))
+            raw_input("Press ENTER to continue...")
             for lmbd, vect in zip(eigen[0], eigen[1]):
-                if np.isreal(vect[0]):
+                if not np.isreal(vect[0]):
                     eigenvalues.append(lmbd)
-            j = np.exp(2.0*np.pi*1.0j*np.arange(1,n+1)*k/n)
+                    # logger.info("Decay and Frequency of the %d mode: %f, %f" % (
+                    #     k, (np.real(lmbd) * tau), (np.imag(lmbd) / (2.0 * np.pi) / tau)))
+            j = np.exp(2.0 * np.pi * 1.0j * np.arange(0, n) * k / n)
             # noinspection PyUnresolvedReferences
-            eigenvectors.append(np.real((1.0/n)*np.add.reduce(np.diag(np.ones(n))*j, axis=0)))
+            eigenvectors.append(np.real((1.0 / n) * np.add.reduce(np.diag(np.ones(n)) * j, axis=0)))
 
-        return  aij, (eigenvalues, eigenvectors)
+        return aij, (eigenvalues, eigenvectors)
 
 
 class FiringRate:
