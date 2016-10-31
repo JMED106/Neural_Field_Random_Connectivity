@@ -88,7 +88,7 @@ class Perturbation:
     """ Tool to handle perturbations: time, duration, shape (attack, decay, sustain, release (ADSR), etc. """
 
     def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None,
-                 amplitude=1.0, attack='exponential', release='instantaneous', cntmodes=None):
+                 amplitude=1.0, attack='exponential', release='instantaneous', cntmodes=None, duration=None):
         if data is None:
             self.d = Data()
         else:
@@ -109,6 +109,8 @@ class Perturbation:
         self.t0step = int(t0 / self.d.dt)
         self.dt = dt
         self.tf = t0 + dt
+        self.t = 0
+        self.duration = duration
         # Rise variables (attack) and parameters
         self.attack = attack
         self.taur = 0.2
@@ -142,7 +144,7 @@ class Perturbation:
                 sprofile += amp * cntmodes[m]
         return sprofile
 
-    def timeevo(self, temps):
+    def timeevo(self, temps, freq=1.0):
         """ Time evolution of the perturbation """
         # Single pulse
         if self.ptype == 'pulse':
@@ -163,7 +165,12 @@ class Perturbation:
                     if temps >= self.t0:
                         self.input = self.amp * self.smod
         elif self.ptype == 'oscillatory':
-            pass
+            if temps >= self.t0 + self.dt:
+                self.trmod = self.amp * np.sin(self.t * 1.0 * freq * 2.0 * np.pi)
+                self.t += self.d.dt
+            if temps >= self.t0 + self.dt + self.duration:
+                self.trmod = 0.0
+            self.input = self.trmod * self.smod
 
 
 class SaveResults:

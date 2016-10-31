@@ -112,7 +112,6 @@ nois = 0.0
 noiseinput = 0.0
 kp = k = 0
 
-tstepr = 0
 tgamma = 0
 Agamma = 0.0
 gamma = 0.0
@@ -134,13 +133,7 @@ while temps < d.tfinal:
             nois = np.sqrt(2.0 * d.dt/d.tau * args.nD) * np.random.randn(d.l)
         else:
             nois = 0.0
-    if temps >= p.t0 + p.dt:
-        # print c.freqs[1]/d.faketau
-        # exit(-1)
-        gamma = Agamma*np.sin(tgamma*1.0*c.freqs[1]*2.0*np.pi)
-        tgamma += d.dt
-    if temps >= p.t0 + p.dt + 100.0:
-        gamma = 0.0
+
 
     p.it[kp, :] = p.input + d.tau / d.dt * nois + gamma*np.ones(d.l)
 
@@ -183,14 +176,10 @@ while temps < d.tfinal:
     # ######################## --   FR EQS.   -- ##
     if d.system == 'nf' or d.system == 'both':
         # We compute the Mean-field vector S ( 1.0/(2.0*pi)*dx = 1.0/l )
-        d.sphi[kbp] = (1.0 / d.l) * np.dot(c.cnt, d.r2[kb])
+        d.sphi[kbp] = (1.0 / d.l) * np.dot(c.cnt, d.r[k])
         # -- Integration -- #
-        d.r2[kbp] = d.r2[kb] + d.dt * (d.delta / pi + 2.0 * d.r2[kb] * d.v[kb])
-        d.v[kbp] = d.v[kb] + d.dt * (d.v[kb]**2 + d.eta0 + d.sphi[kbp] - pi2 * d.r2[kb]**2 + p.it[kp])
-
-    if tstep % 1 == 0:
-        d.r[tstepr % d.nsteps] = d.r2[kbp]*1.0
-        tstepr += 1
+        d.r[kp] = d.r[k] + d.dt * (d.delta / pi + 2.0 * d.r[k] * d.v[kb])
+        d.v[kp] = d.v[k] + d.dt * (d.v[k]**2 + d.eta0 + d.sphi[kbp] - pi2 * d.r[k]**2 + p.it[kp])
 
     # Perturbation at certain time
     if int(p.t0 / d.dt) == tstep:

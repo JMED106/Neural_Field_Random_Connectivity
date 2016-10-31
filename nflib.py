@@ -69,14 +69,10 @@ class Data:
         self.faketau = faketau  # time scale in ms
 
         # 0.7) FIRING RATE EQUATIONS
-        self.r = np.zeros((self.nsteps / 1, l))
-
-        self.r2 = np.ones((2, l))
-        # self.v = np.ones((self.nsteps, l)) * (-0.01)
-        self.v = np.ones((2, l)) * (-0.01)
-        # self.sphi = np.ones((self.nsteps, l))
+        self.r = np.zeros((self.nsteps, l))
+        self.v = np.ones((self.nsteps, l)) * (-0.01)
         self.sphi = np.ones((2, l))
-        # self.r[len(self.r) - 1, :] = 0.1
+        self.r[len(self.r) - 1, :] = 0.1
         # Load INITIAL CONDITIONS
         self.sphi[len(self.sphi) - 1] = 0.0
 
@@ -207,7 +203,6 @@ class Data:
         if system == 'nf' or system == 'both':
             self.fileprm = '%.2lf-%.2lf-%.2lf-%d' % (j0, self.eta0, self.delta, self.l)
             if len(self.v[:, 0]) == 2:
-                self.r2[-1, :] = np.ones(self.l) * self.r0
                 self.v[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
             else:
                 self.r[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
