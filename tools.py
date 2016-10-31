@@ -202,7 +202,8 @@ class SaveResults:
         # Parameters are store copying the configuration dictionary and other useful parameters (from the beginning)
         self.results['parameters'] = {'l': self.d.l, 'eta0': self.d.eta0, 'delta': self.d.delta, 'j0': self.d.j0,
                                       'tau': self.d.faketau, 'args': parameters}
-        self.results['connectivity'] = {'type': cnt.profile, 'cnt': cnt.cnt, 'eigenmodes': cnt.eigenmodes,
+        self.results['connectivity'] = {'type': cnt.profile, 'cnt_ex': cnt.cnt_ex, 'cnt_in': cnt.cnt_in, 'cnt': cnt.cnt_ex + cnt.cnt_in,
+                                        'eigenmodes': cnt.eigenmodes,
                                         'eigenvectors': cnt.eigenvectors, 'freqs': cnt.freqs}
         self.results['perturbation'] = {'t0': pert.t0}
         if cnt.profile == 'mex-hat':
@@ -225,28 +226,6 @@ class SaveResults:
             self.results[system]['fr'] = dict(ring=self.d.rstored[system])
             self.results[system]['vstored'] = dict(ring=self.d.vstored[system])
             self.results[system]['fr']['distribution'] = self.d.dr[system]
-            t = []
-            if 'phi0' in kwargs:
-                self.results[system]['fr']['ts'] = {'p%s' % str(phi0): self.d.rstored[system][:, phi0] for phi0 in
-                                                    list(dict(kwargs)['phi0'])}
-                self.results[system]['vstored']['ts'] = {'p%s' % str(phi0): self.d.vstored[system][:, phi0] for phi0 in
-                                                         list(dict(kwargs)['phi0'])}
-            if 't0' in kwargs:
-                for t0 in list(dict(kwargs)['t0']):
-                    t0p, t0pid = find_nearest(self.d.t[system], t0, ret='both')
-                    if np.abs(t0p - t0) > tol:
-                        # Emergency save
-                        print "ERROR: time %lf not in data array." % t0
-                        print "Closest time was %lf. Difference is %lf and tolerance %lf." % (
-                            t0p, np.abs(t0p - t0), tol)
-                        self.save()
-                        exit(-1)
-                    else:
-                        t.append(t0pid)
-
-                self.results[system]['fr']['profiles'] = {'t%s' % str(ti): self.d.rstored[system][ti] for ti in t}
-                self.results[system]['vstored']['profiles'] = {'t%s' % str(ti): self.d.vstored[system][ti] for ti in t}
-                del t
 
     def save(self):
         """ Saves all relevant data into a numpy object with date as file-name."""
@@ -370,6 +349,7 @@ class FrequencySpectrum:
            + Decaying frequencies after a perturbation.
            + Frequencies of the system under GWN.
     """
+
     def __init__(self):
         """ Plotting parameters? Saving parameters?"""
         pass
@@ -380,13 +360,13 @@ class FrequencySpectrum:
         num_points = len(tdata)
 
         t = np.linspace(t0, t1, num_points)
-        dt = (t1 - t0) / (1.0*num_points)
+        dt = (t1 - t0) / (1.0 * num_points)
 
         # FFT data
         tf = np.linspace(0, 1.0 / (2.0 * dt), num_points / 2)
         yf = 2.0 / num_points * np.abs(fft(tdata)[0:num_points / 2])
         # 70 va bastante bien
-        yf2 =  welch(tdata, fs=1.0/(tau*dt), nperseg=1024*80)
+        yf2 = welch(tdata, fs=1.0 / (tau * dt), nperseg=1024 * 80)
         plt.plot(yf2[0], yf2[1])
         plt.xlim([0, 100])
         plt.show()
@@ -417,7 +397,6 @@ class FrequencySpectrum:
         # print freq
         return freq
 
-
     @staticmethod
     def plotdata(x, data, xf, dataf):
         plt.plot(x[0:-1:100], data[0:-1:100])
@@ -426,6 +405,7 @@ class FrequencySpectrum:
         plt.plot(xf, dataf)
         plt.grid()
         plt.show()
+
 
 class DictToObj(object):
     """Class that transforms a dictionary d into an object. Note that dictionary keys must be

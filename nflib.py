@@ -69,10 +69,13 @@ class Data:
         self.faketau = faketau  # time scale in ms
 
         # 0.7) FIRING RATE EQUATIONS
-        self.r = np.zeros((self.nsteps, l))
-        self.v = np.ones((self.nsteps, l)) * (-0.01)
+        self.r_ex = np.zeros((self.nsteps, l))
+        self.r_in = np.zeros((self.nsteps, l))
+        self.v_ex = np.ones((self.nsteps, l)) * (-0.01)
+        self.v_in = np.ones((self.nsteps, l)) * (-0.01)
         self.sphi = np.ones((2, l))
-        self.r[len(self.r) - 1, :] = 0.1
+        self.r_ex[len(self.r_ex) - 1, :] = 0.1
+        self.r_in[len(self.r_in) - 1, :] = 0.1
         # Load INITIAL CONDITIONS
         self.sphi[len(self.sphi) - 1] = 0.0
 
@@ -202,11 +205,16 @@ class Data:
 
         if system == 'nf' or system == 'both':
             self.fileprm = '%.2lf-%.2lf-%.2lf-%d' % (j0, self.eta0, self.delta, self.l)
-            if len(self.v[:, 0]) == 2:
-                self.v[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+            if len(self.v_ex[:, 0]) == 2:
+                self.v_ex[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+                self.v_in[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
             else:
-                self.r[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
-                self.v[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+                self.r_ex[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
+                self.r_in[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
+                self.v_ex[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+                self.v_in[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+                logger.info("Stationary firing rate: %f" % self.r0)
+                logger.info("Stationary mean membrane potential: %f" % (-self.delta / (2.0 * self.r0 * np.pi)))
 
         if system == 'qif' or system == 'both':
             print "Loading initial conditions ... "
@@ -305,8 +313,8 @@ class Data:
             self.dr['qif'] = dict(all=fr.frqif0, inst=fr.rqif)
 
         if self.system == 'nf' or self.system == 'both':
-            self.rstored['nf'] = self.r
-            self.vstored['nf'] = self.v
+            self.rstored['nf'] = {'ex': self.r_ex, 'inh': self.r_in}
+            self.vstored['nf'] = {'ex': self.v_ex, 'inh': self.v_in}
             self.t['nf'] = self.tpoints
             self.k['nf'] = None
             self.dr['nf'] = th.thdist
@@ -334,9 +342,8 @@ class Connectivity:
         # Number of points (sample) of the function. It should be the number of populations in the ring.
         self.l = length
         # Connectivity function and spatial coordinates
-        self.cnt = np.zeros((length, length))
-        # [i_n, j_n] = 2.0 * np.pi * np.float64(np.meshgrid(xrange(length), xrange(length))) / length - np.pi
-        # ij = np.abs(i_n - j_n)
+        self.cnt_ex = np.zeros((length, length))
+        self.cnt_in = np.zeros((length, length))
         [i_n, j_n] = np.meshgrid(xrange(length), xrange(length))
         ij = (i_n - j_n) * (2.0 * np.pi / length)
         del i_n, j_n  # Make sure you delete these matrices here !!!
@@ -352,7 +359,8 @@ class Connectivity:
                 self.ji = amplitude
                 self.me = me
                 self.mi = mi
-            self.cnt = self.vonmises(self.je, me, self.ji, mi, coords=ij)
+            self.cnt_ex = self.vonmises(self.je, me, 0.0, mi, coords=ij)
+            self.cnt_in = self.vonmises(0, me, self.ji, mi, coords=ij)
             # Compute eigenmodes
             self.eigenmodes = self.vonmises_modes(self.je, me, self.ji, mi)
             self.eigenvectors = None
@@ -360,7 +368,20 @@ class Connectivity:
             # Generate fourier series with modes fsmodes
             if fsmodes is None:
                 fsmodes = 10.0 * np.array([0, 1, 0.75, -0.25])  # Default values
-            self.cnt = self.jcntvty(fsmodes, coords=ij)
+                fsmodes_ex = 10.0 * np.array([0.75*2.0, 1, 0.75, -0.25])  # Default values
+                fsmodes_in = 10.0 * np.array([-0.75*2.0, 0.0, 0.0, 0.0])  # Default values
+            else:
+                fsmodes_ex = list(fsmodes)
+                fsmodes_in = [0.0, 0.0]
+                maxmode = np.max(fsmodes)
+                mode0 = fsmodes[0]
+                if mode0 < maxmode*2.0:
+                    fsmodes_ex[0] = maxmode*2.0
+                    fsmodes_in[0] = fsmodes[0] - maxmode*2.0
+            logger.info("Excitatory modes: %s" % str(fsmodes_ex))
+            logger.info("Inhibitory modes: %s" % str(fsmodes_in))
+            self.cnt_ex = self.jcntvty(fsmodes_ex, coords=ij)
+            self.cnt_in = self.jcntvty(fsmodes_in, coords=ij)
             # TODO: separate excitatory and inhibitory connectivity
             self.eigenmodes = fsmodes
             self.eigenvectors = None

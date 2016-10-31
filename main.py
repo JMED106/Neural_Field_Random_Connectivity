@@ -112,30 +112,25 @@ nois = 0.0
 noiseinput = 0.0
 kp = k = 0
 
-tgamma = 0
-Agamma = 0.0
-gamma = 0.0
-
 # Time loop
 while temps < d.tfinal:
     # Time step variables
     kp = tstep % d.nsteps
     k = (tstep + d.nsteps - 1) % d.nsteps
-    kbp = tstep % 2
-    kb = (tstep + 2 - 1) % 2
+    k2p = tstep % 2
+    k2 = (tstep + 2 - 1) % 2
     # ######################## - PERTURBATION  - ##
     if p.pbool and not d.new_ic:
         if temps >= p.t0:
             p.timeevo(temps)
-            pt0step = tstep*1
+            pt0step = tstep * 1
     if args.ns and not d.new_ic:
         if tstep % 1 == 0:
-            nois = np.sqrt(2.0 * d.dt/d.tau * args.nD) * np.random.randn(d.l)
+            nois = np.sqrt(2.0 * d.dt / d.tau * args.nD) * np.random.randn(d.l)
         else:
             nois = 0.0
 
-
-    p.it[kp, :] = p.input + d.tau / d.dt * nois + gamma*np.ones(d.l)
+    p.it[kp, :] = p.input + d.tau / d.dt * nois
 
     # ######################## -  INTEGRATION  - ##
     # ######################## -      qif      - ##
@@ -176,10 +171,12 @@ while temps < d.tfinal:
     # ######################## --   FR EQS.   -- ##
     if d.system == 'nf' or d.system == 'both':
         # We compute the Mean-field vector S ( 1.0/(2.0*pi)*dx = 1.0/l )
-        d.sphi[kbp] = (1.0 / d.l) * np.dot(c.cnt, d.r[k])
+        d.sphi[k2p] = (1.0 / d.l * np.dot(c.cnt_ex, d.r_ex[k]) + 1.0 / d.l * np.dot(c.cnt_in, d.r_in[k]))
         # -- Integration -- #
-        d.r[kp] = d.r[k] + d.dt * (d.delta / pi + 2.0 * d.r[k] * d.v[kb])
-        d.v[kp] = d.v[k] + d.dt * (d.v[k]**2 + d.eta0 + d.sphi[kbp] - pi2 * d.r[k]**2 + p.it[kp])
+        d.r_ex[kp] = d.r_ex[k] + d.dt * (d.delta / pi + 2.0 * d.r_ex[k] * d.v_ex[k])
+        d.v_ex[kp] = d.v_ex[k] + d.dt * (d.v_ex[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_ex[k] ** 2 + p.it[kp])
+        d.r_in[kp] = d.r_in[k] + d.dt * (d.delta / pi + 2.0 * d.r_in[k] * d.v_in[k])
+        d.v_in[kp] = d.v_in[k] + d.dt * (d.v_in[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_in[k] ** 2)
 
     # Perturbation at certain time
     if int(p.t0 / d.dt) == tstep:
@@ -191,6 +188,10 @@ while temps < d.tfinal:
     pbar.update(10 * tstep + 1)
     temps += d.dt
     tstep += 1
+
+
+logger.info("Stationary firing rate (excitatory and inhibitory): %f, %f" % (d.r_ex[kp, 0], d.r_in[kp, 0]))
+logger.info("Stationary mean membrane potential (excitatory and inhibitory): %f, %f" % (d.v_ex[kp, 0], d.v_in[kp, 0]))
 
 # Finish pbar
 pbar.finish()
@@ -226,12 +227,12 @@ sr.save()
 
 # # Preliminar plotting with gnuplot
 gp = Gnuplot.Gnuplot(persist=1)
-p1 = Gnuplot.PlotItems.Data(np.c_[d.tpoints * d.faketau, d.r[:, d.l / 2] / d.faketau], with_='lines')
+p1 = Gnuplot.PlotItems.Data(np.c_[d.tpoints * d.faketau, d.r_ex[:, d.l / 2] / d.faketau], with_='lines')
 if args.s != 'nf':
     p2 = Gnuplot.PlotItems.Data(np.c_[np.array(fr.tempsfr) * d.faketau, np.array(fr.r)[:, d.l / 2] / d.faketau],
                                 with_='lines')
 else:
     p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints * d.faketau, p.it[:, d.l / 2] + d.r0 / d.faketau], with_='lines')
-gp.plot(p1,p2)
+gp.plot(p1, p2)
 
 # np.savetxt("p%d.dat" % args.m, np.c_[d.tpoints * d.faketau, d.r[:, d.l / 2] / d.faketau])

@@ -7,7 +7,6 @@
 Perturbation:
   -m --mode:
     description: "Spatial mode of the perturbation."
-    # default:     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     default:     [1]
     name:        "<mode>"
     choices:     ~
@@ -28,7 +27,7 @@ Perturbation:
     choices:     ~
   -A --attack:
     description: "Pulse attack function."
-    default:     'instantaneous'
+    default:     'exponential'
     name:        "<attack>"
     choices:     ['exponential', 'instantaneous']
   -R --release:
@@ -81,7 +80,7 @@ Network:
     choices:     ['uniform', 'mex-hat', 'fs', 'pecora1']
   -j --coupling:
     description: "Synaptic coupling strength."
-    default:     10.0
+    default:     0.0
     name:        "<j0>"
     choices:     ~
   -jk --modes:
