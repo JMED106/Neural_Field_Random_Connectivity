@@ -35,16 +35,23 @@ def __init__(argv):
             print 'load_data.py [-f <file>]'
             sys.exit()
 
+data = None
+
+def loadata(file, data):
+    del data
+    data = None
+    d = np.load(file)
+    return DictToObj(d.item())
 
 fin = __init__(sys.argv[1:])
-d = np.load(fin)
-data = DictToObj(d.item())
+
+data = loadata(fin, data)
 phi = np.linspace(-pi, pi, data.parameters.l)
 phip = np.linspace(-pi, pi, data.parameters.l + 1)
 
 # We store the time series in a different file (for easier management)
 # Comment lines to disable :b
-ts_r = np.array(data.qif.fr.ring) / data.parameters.tau
-ts_t = np.array(data.qif.t) * data.parameters.tau
-np.save("ts_r.npy", ts_r)
-np.save("ts_t.npy", ts_t)
+# ts_r = np.array(data.qif.fr.ring) / data.parameters.tau
+# ts_t = np.array(data.qif.t) * data.parameters.tau
+# np.save("ts_r.npy", ts_r)
+# np.save("ts_t.npy", ts_t)

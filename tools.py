@@ -9,6 +9,12 @@ import matplotlib.pyplot as plt
 
 from nflib import Data, Connectivity
 
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 __author__ = 'Jose M. Esnaola Acebes'
 
 """ Library containing different tools to use alongside the main simulation:
@@ -87,8 +93,9 @@ def find_nearest(array, value, ret='id'):
 class Perturbation:
     """ Tool to handle perturbations: time, duration, shape (attack, decay, sustain, release (ADSR), etc. """
 
-    def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None,
+    def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None, debug=100,
                  amplitude=1.0, attack='exponential', release='instantaneous', cntmodes=None, duration=None):
+        logger.setLevel(debug)
         if data is None:
             self.d = Data()
         else:
@@ -135,7 +142,7 @@ class Perturbation:
         """
         sprofile = 0.0
         if np.isscalar(modes):
-            print "Warning! 'modes' should be an iterable."
+            logger.warning("'Modes' should be an iterable.")
             modes = [modes]
         for m in modes:
             if cntmodes is None:

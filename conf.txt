@@ -7,13 +7,18 @@
 Perturbation:
   -m --mode:
     description: "Spatial mode of the perturbation."
-    default:     [1]
+    default:     !!int 1
     name:        "<mode>"
     choices:     ~
   -a --amplitude:
     description: "Amplitude of the perturbation."
     default:     1.0
     name:        "<amplitude>"
+    choices:     ~
+  -sym --symmetry:
+    description: "Symmetry of the perturbation."
+    default:     0.0
+    name:        "<symmetry>"
     choices:     ~
   -pt --pulseDt:
     description: "Duration of the pulse (a.u.)"
@@ -38,9 +43,9 @@ Perturbation:
 Noise:
   -ns --noise:
     description: "Spatial noise boolean."
-    default:     False
+    default:     false
     name:        "<noise>"
-    choices:     [True, False]
+    choices:     [true, false]
   -nD --noisediffusion:
     description: "Spatial noise diffusion parameter."
     default:     1.0
@@ -85,7 +90,7 @@ Network:
     choices:     ~
   -jk --modes:
     description: "Modes of connectivity."
-    default:     [0, 10.0]
+    default:     [0, 10, 7.5, -2.5]
     name:        "<[jk]>"
     choices:     ~
   -N --popsize:
@@ -121,14 +126,14 @@ Simulation:
     choices:     ~
   -ic --initconds:
     description: "Override initial conditions generator."
-    default:     False
+    default:     false
     name:        "<initconds>"
-    choices:     [False ,True]
+    choices:     [false ,true]
   -oic --overrideic:
     description: "Override initial conditions generator."
-    default:     False
+    default:     false
     name:        "<overinitconds>"
-    choices:     [True, False]
+    choices:     [true, false]
   -s --system:
     description: "Systems to be simulated."
     default:     'nf'
@@ -141,7 +146,7 @@ Simulation:
     choices:     ~
   -dt --timestep:
     description: "Time step (a.u.)."
-    default:     1E-3
+    default:     0.001
     name:        "<dt>"
     choices:     ~
   -t0 --inittime:
@@ -149,3 +154,25 @@ Simulation:
     default:     0.0
     name:        "<t0>"
     choices:     ~
+  -nos --nosave:
+    description: "Don't save data to dictionary."
+    default:     False
+    name:        "<no-save>"
+    choices:     ~
+  -db --debug:
+    description: "Debugging level. Default is info (20)."
+    default:     20
+    name:        "<debug>"
+    choices:     ~
+  -pl --plot:
+    description: "Saving minimal data and plotting."
+    default:     False
+    name:        "<plot>"
+    choices:     [True, False]
+  -gpl --gplot:
+    description: "Preliminary plotting with gnuplot."
+    default:     False
+    name:        "<gplot>"
+    choices:     [True, False]
+
+    

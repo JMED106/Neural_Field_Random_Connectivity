@@ -40,8 +40,10 @@ class Data:
     """
 
     def __init__(self, l=100, n=1E5, eta0=0, j0=0.0, delta=1.0, t0=0.0, tfinal=50.0,
-                 dt=1E-3, delay=0.0, tau=1.0, faketau=20.0E-3, fp='lorentz', system='nf'):
+                 dt=1E-3, delay=0.0, tau=1.0, faketau=20.0E-3, fp='lorentz', system='nf', debug=100):
 
+        # ## Debugging ###
+        logger.setLevel(debug)
         # 0.1) Network properties:
         self.l = l
         self.dx = 2.0 * np.pi / np.float(l)
@@ -69,8 +71,8 @@ class Data:
         self.faketau = faketau  # time scale in ms
 
         # 0.7) FIRING RATE EQUATIONS
-        self.r_ex = np.zeros((self.nsteps, l))
-        self.r_in = np.zeros((self.nsteps, l))
+        self.r_ex = np.ones((self.nsteps, l)) * 0.0
+        self.r_in = np.ones((self.nsteps, l)) * 0.0
         self.v_ex = np.ones((self.nsteps, l)) * (-0.01)
         self.v_in = np.ones((self.nsteps, l)) * (-0.01)
         self.sphi = np.ones((2, l))
@@ -88,8 +90,7 @@ class Data:
 
         # 0.8) QIF model parameters
         if system != 'nf':
-            print "Loading QIF parameters:"
-            print "***********************"
+            logger.info("Loading QIF parameters:")
             self.fp = fp
             # sub-populations
             self.N = n
@@ -99,7 +100,7 @@ class Data:
             # sub-populations
             self.dN = int(np.float(n) / np.float(l))
             if self.dN * l != n:
-                print('Warning: n, l not dividable')
+                logger.warning('Warning: n, l not dividable')
 
             self.vpeak = 100.0  # Value of peak voltage (max voltage)
             # self.vreset = -self.vpeak  # Value of resetting voltage (min voltage)
@@ -128,16 +129,16 @@ class Data:
             # Distributions of the external current       -- FOR l populations --
             self.eta = None
             if fp == 'lorentz' or fp == 'gauss':
-                print "+ Setting distribution of external currents: "
+                logger.info("+ Setting distribution of external currents: ")
                 self.eta = np.zeros(self.N)
                 if fp == 'lorentz':
-                    print '   - Lorentzian distribution of external currents'
+                    logger.info('   - Lorentzian distribution of external currents')
                     # Uniform distribution
                     k = (2.0 * np.arange(1, self.dN + 1) - self.dN - 1.0) / (self.dN + 1.0)
                     # Cauchy ppf (stats.cauchy.ppf can be used here)
                     eta_pop_e = eta0 + delta * np.tan((np.pi / 2.0) * k)
                 else:
-                    print '   - Gaussian distribution of external currents'
+                    logger.info('   - Gaussian distribution of external currents')
                     k = (np.arange(1, self.dN + 1)) / (self.dN + 1.0)
                     eta_pop_e = eta0 + delta * stats.norm.ppf(k)
 
@@ -146,10 +147,10 @@ class Data:
                     self.eta[i * self.dN:(i + 1) * self.dN] = 1.0 * eta_pop_e
                 del eta_pop_e
             elif fp == 'noise':
-                print "+ Setting homogeneous population of neurons (identical), under GWN."
+                logger.info("+ Setting homogeneous population of neurons (identical), under GWN.")
                 self.eta = np.ones(self.N) * self.eta0
             else:
-                print "This distribution is not implemented, yet."
+                logger.critical("This distribution is not implemented, yet.")
                 exit(-1)
 
             # QIF neurons matrices (declaration)
@@ -211,13 +212,15 @@ class Data:
             else:
                 self.r_ex[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
                 self.r_in[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * self.r0
-                self.v_ex[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
-                self.v_in[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
+                self.v_ex[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (
+                    -self.delta / (2.0 * self.r0 * np.pi))
+                self.v_in[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (
+                    -self.delta / (2.0 * self.r0 * np.pi))
                 logger.info("Stationary firing rate: %f" % self.r0)
                 logger.info("Stationary mean membrane potential: %f" % (-self.delta / (2.0 * self.r0 * np.pi)))
 
         if system == 'qif' or system == 'both':
-            print "Loading initial conditions ... "
+            logger.info("Loading initial conditions ... ")
             if np.abs(j0) < 1E-2:
                 j0zero = 0.0
             else:
@@ -227,26 +230,28 @@ class Data:
             try:
                 self.spikes = np.load("%sic_qif_spikes_%s-%d.npy" % (self.filepath, self.fileprm, self.N))
                 self.matrix = np.load("%sic_qif_matrix_%s-%d.npy" % (self.filepath, self.fileprm, self.N))
-                print "Successfully loaded all data matrices."
+                logger.info("Successfully loaded all data matrices.")
             except IOError:
-                print "Files do not exist or cannot be read. Trying the most similar combination."
+                logger.error("Files do not exist or cannot be read. Trying the most similar combination.")
                 self.new_ic = True
             except ValueError:
-                print "Not appropriate format of initial conditions. Check the files for logical errors..."
+                logger.critical("Not appropriate format of initial conditions. Check the files for logical errors...")
                 exit(-1)
 
             # If the loading fails or new_ic is overridden we look for the closest combination in the data base
             database = None
             if self.new_ic is True:
-                print "WARNING: New initial conditions will be created, wait until the simulation has finished."
+                logger.warning(
+                    "WARNING: New initial conditions will be created, wait until the simulation has finished.")
                 try:
                     database = np.load("%sinitial_conditions_%s.npy" % (self.filepath, self.fp))
                     if np.size(np.shape(database)) < 2:
                         database.resize((1, np.size(database)))
                     load = True
                 except IOError:
-                    print "Iinitial conditions database not found (%sinitial_conditions_%s)" % (self.filepath, self.fp)
-                    print "Loading random conditions."
+                    logger.error(
+                        "Iinitial conditions database not found (%sinitial_conditions_%s)" % (self.filepath, self.fp))
+                    logger.info("Loading random conditions.")
                     load = False
 
                 # If the chosen combination is not in the database we create new initial conditions
@@ -264,22 +269,23 @@ class Data:
                     try:
                         self.spikes = np.load("%sic_qif_spikes_%s-%d.npy" % (self.filepath, self.fileprm2, n))
                         self.matrix = np.load("%sic_qif_matrix_%s-%d.npy" % (self.filepath, self.fileprm2, n))
-                        print "Successfully loaded all data matrices."
+                        logger.info("Successfully loaded all data matrices.")
                     except IOError:
-                        print "Files do not exist or cannot be read. This behavior wasn't expected ..."
+                        logger.error("Files do not exist or cannot be read. This behavior wasn't expected ...")
                         exit(-1)
                     except ValueError:
-                        print "Not appropriate format of initial conditions. Check the files for logical errors..."
+                        logger.critical(
+                            "Not appropriate format of initial conditions. Check the files for logical errors...")
                         exit(-1)
                 else:  # Create new initial conditions from scratch (loading random conditions)
-                    print "Generating new initial conditions. " \
-                          "Run the program using the same conditions after the process finishes."
+                    logger.info(
+                        "Generating new initial conditions.\n Run the program using the same conditions after the process finishes.")
                     # We set excitatory and inhibitory neurons at the same initial conditions:
                     self.matrix[:, 0] = -0.1 * np.random.randn(self.N)
 
     def save_ic(self, temps):
         """ Function to save initial conditions """
-        print "Saving configuration for initial conditions ..."
+        logger.info("Saving configuration for initial conditions ...")
         np.save("%sic_qif_spikes_%s-%d" % (self.filepath, self.fileprm, self.N), self.spikes)
         self.matrix[:, 1] = self.matrix[:, 1] - (temps - self.dt)
         np.save("%sic_qif_matrix_%s-%d.npy" % (self.filepath, self.fileprm, self.N), self.matrix)
@@ -288,8 +294,9 @@ class Data:
         try:
             db = np.load("%sinitial_conditions_%s.npy" % (self.filepath, self.fp))
         except IOError:
-            print "Initial conditions database not found (%sinitial_conditions_%s.npy)" % (self.filepath, self.fp)
-            print "Creating database ..."
+            logger.error(
+                "Initial conditions database not found (%sinitial_conditions_%s.npy)" % (self.filepath, self.fp))
+            logger.info("Creating database ...")
             db = False
         if db is False:
             np.save("%sinitial_conditions_%s" % (self.filepath, self.fp),
@@ -337,8 +344,8 @@ class Connectivity:
             called separately.
         """
 
-        print "Creating connectivity matrix (depending on the size of the matrix (%d x %d) " \
-              "this can take a lot of RAM)" % (length, length)
+        logger.info("Creating connectivity matrix (depending on the size of the matrix (%d x %d) "
+                    "this can take a lot of RAM)" % (length, length))
         # Number of points (sample) of the function. It should be the number of populations in the ring.
         self.l = length
         # Connectivity function and spatial coordinates
@@ -368,18 +375,18 @@ class Connectivity:
             # Generate fourier series with modes fsmodes
             if fsmodes is None:
                 fsmodes = 10.0 * np.array([0, 1, 0.75, -0.25])  # Default values
-                fsmodes_ex = 10.0 * np.array([0.75*2.0, 1, 0.75, -0.25])  # Default values
-                fsmodes_in = 10.0 * np.array([-0.75*2.0, 0.0, 0.0, 0.0])  # Default values
+                fsmodes_ex = 10.0 * np.array([0.75 * 2.0, 1, 0.75, -0.25])  # Default values
+                fsmodes_in = 10.0 * np.array([-0.75 * 2.0, 0.0, 0.0, 0.0])  # Default values
             else:
                 fsmodes_ex = list(fsmodes)
                 fsmodes_in = [0.0, 0.0]
                 maxmode = np.max(fsmodes)
                 mode0 = fsmodes[0]
-                if mode0 < maxmode*2.0:
-                    fsmodes_ex[0] = maxmode*2.0
-                    fsmodes_in[0] = fsmodes[0] - maxmode*2.0
-            logger.info("Excitatory modes: %s" % str(fsmodes_ex))
-            logger.info("Inhibitory modes: %s" % str(fsmodes_in))
+                if mode0 < maxmode * 2.0:
+                    fsmodes_ex[0] = maxmode * 2.0
+                    fsmodes_in[0] = fsmodes[0] - maxmode * 2.0
+            logger.debug("Excitatory modes: %s" % str(fsmodes_ex))
+            logger.debug("Inhibitory modes: %s" % str(fsmodes_in))
             self.cnt_ex = self.jcntvty(fsmodes_ex, coords=ij)
             self.cnt_in = self.jcntvty(fsmodes_in, coords=ij)
             # TODO: separate excitatory and inhibitory connectivity
@@ -395,7 +402,7 @@ class Connectivity:
                     logger.error(e)
                     aij = self.uniform_in_degree(length, degree)
             self.cnt = data.j0 * aij
-            logger.info("Connectivity matrix:\n%s" % str(self.cnt))
+            logger.debug("Connectivity matrix:\n%s" % str(self.cnt))
             # For Hermitian matrices self.modes = np.linalg.eigh(self.cnt)
             (self.eigenmodes, self.eigenvectors) = np.linalg.eigh(self.cnt)
         elif profile == 'pecora1':
@@ -409,10 +416,10 @@ class Connectivity:
         # Compute frequencies for the ring model (if data is provided)
         if data is not None and profile in ('mex-hat', 'fs'):
             self.freqs = self.frequencies(self.eigenmodes, data)
-            print np.array(self.freqs) / data.faketau
+            logger.debug(np.array(self.freqs) / data.faketau)
         elif profile in 'pecora1':
-            self.freqs = self.frequencies(fsmodes, data, type='pecora', n=length, alpha=data.j0)
-            print self.freqs
+            self.freqs = self.frequencies(fsmodes, data, ntype='pecora', n=length, alpha=data.j0)
+            logger.debug(self.freqs)
             np.savetxt("freqs.txt", self.freqs)
 
     def searchmode(self, mode, amp, me, mi):
@@ -451,7 +458,7 @@ class Connectivity:
         return je, me, ji, mi
 
     @staticmethod
-    def frequencies(modes, data=None, eta=None, tau=None, delta=None, r0=None, type='ring-all', alpha=0.0, n=100):
+    def frequencies(modes, data=None, eta=None, tau=None, delta=None, r0=None, ntype='ring-all', alpha=0.0, n=100):
         """ Function that computes frequencies of decaying oscillations at the homogeneous state
         :param modes: array of modes, ordered from 0 to maximum wavenumber. If only zeroth mode is passed,
                       then it should be passed as an array. E.g. [1.0]. (J_0 = 1.0).
@@ -471,27 +478,28 @@ class Connectivity:
             j0 = data.j0
         # If not:
         elif (eta is None) or (tau is None) or (delta is None):
-            print 'Not enough data to compute frequencies'
+            logger.warning('Not enough data to compute frequencies')
             return None
         if r0 is None:  # We have to compute the firing rate at the stationary state
-            if type == 'pecora':
+            if ntype == 'pecora':
                 r0 = Connectivity.rtheory(0, eta, delta)[0]
                 logger.info("r0: %f" % r0)
             else:
                 r0 = Connectivity.rtheory(modes[0], eta, delta)
         r0u = r0 / tau
         f = []
-        if type == 'ring-all':
+        if ntype == 'ring-all':
             for k, m in enumerate(modes):
                 if m / (2 * np.pi ** 2 * tau * r0u) <= 1:
                     f.append(r0u * np.sqrt(1.0 - m / (2 * np.pi ** 2 * tau * r0u)))
                 else:
                     f.append(r0u * np.sqrt(m / (2 * np.pi ** 2 * tau * r0u) - 1.0))
-                    print "Fixed point is above the Saddle Node bifurcation for k = %d: there are not " \
-                          "decaying oscillations for the homogeneous state." % k
-                    print "These values plus the one corresponding to the decay are now the actual decays of overdamped " \
-                          "oscillations."
-        elif type == 'pecora':
+                    logger.info("Fixed point is above the Saddle Node bifurcation for k = %d: there are not "
+                                "decaying oscillations for the homogeneous state." % k)
+                    logger.info(
+                        "These values plus the one corresponding to the decay are now the actual decays of overdamped "
+                        "oscillations.")
+        elif ntype == 'pecora':
             for k in xrange(n):
                 f.append(r0 * np.sqrt(1.0 + 2 * alpha * (np.sin(np.pi * k / n)) ** 2 / (r0 * np.pi ** 2)))
         return f
