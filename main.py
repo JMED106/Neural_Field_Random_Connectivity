@@ -42,7 +42,7 @@ conffile = vars(farg[0])['-f']
 debug = getattr(logging, vars(farg[0])['db'].upper(), None)
 if not isinstance(debug, int):
     raise ValueError('Invalid log level: %s' % vars(farg[0])['db'])
-logging.basicConfig(level=getattr(logging, vars(farg[0])['db'].upper()))
+logging.basicConfig(level=getattr(logging, vars(farg[0])['db'].upper()), format='%(levelname)s:%(name)s:%(funcName)s:\t%(message)s')
 logger = logging.getLogger(__name__)
 
 # We open the configuration file to load parameters (not optional)
@@ -80,8 +80,7 @@ args = parser.parse_args(farg[1], namespace=ops)
 # ##################################################################################
 # 0) PREPARE FOR CALCULATIONS
 # 0.1) Load data object:
-d = Data(l=args.n, n=args.N, eta0=args.e, j0=args.j, delta=args.d, tfinal=args.T, system=args.s, fp=args.D,
-         debug=debug, dt=args.dt)
+d = Data(l=args.n, n=args.N, eta0=args.e, j0=args.j, delta=args.d, tfinal=args.T, system=args.s, fp=args.D, dt=args.dt)
 
 # 0.2) Create connectivity matrix and extract eigenmodes
 c = Connectivity(d.l, profile=args.c, fsmodes=args.jk, amplitude=10.0, data=d, degree=args.dg, saved=True)
@@ -225,7 +224,8 @@ temps -= d.dt
 # th.thdist = th.theor_distrb(d.sphi[kp])
 
 # Frequency analysis
-F.analyze(d.r_ex[:, d.l / 2] - d.r0, 0.0, d.tfinal, d.faketau)
+if args.Frq:
+    F.analyze(d.r_ex[:, d.l / 2] - d.r0, 0.0, d.tfinal, d.faketau)
 # y = F.butter_bandpass_filter(d.r_ex[:, d.l/2]/d.faketau - d.r0/d.faketau, 20.0, 100.0, 1.0/ (d.dt*d.faketau), order=3)
 
 # Save initial conditions
@@ -248,7 +248,7 @@ if not args.nos:
         d.register_ts(th=th)
 
     # Save results
-    sr.create_dict(phi0=[d.l / 2, d.l / 4, d.l / 20], t0=int(d.total_time / 10) * np.array([2, 4, 6, 8]))
+    sr.create_dict()
     sr.results['perturbation']['It'] = p.it
     sr.save()
 

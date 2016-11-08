@@ -99,7 +99,6 @@ class Perturbation:
 
     def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None, amplitude=1.0, attack='exponential',
                  release='instantaneous', cntmodes=None, duration=None):
-        # self.logger.setLevel(debug)
         if data is None:
             self.d = Data()
         else:
@@ -149,10 +148,9 @@ class Perturbation:
         """ Gives the spatial profile of the perturbation: different wavelength and combinations
             of them can be produced.
         """
-        log = self.log.getChild('sptprofile')
         sprofile = 0.0
         if np.isscalar(modes):
-            log.warning("'Modes' should be an iterable.")
+            self.log.warning("'Modes' should be an iterable.")
             modes = [modes]
         for m in modes:
             if cntmodes is None:
@@ -504,17 +502,16 @@ class ColorPlot:
         self.tsfinal = np.size(self.tpointsr)
 
     def cplot(self, xdata, density=1.0, paper=True):
-        log = self.log.getChild('cplot')
         if paper:
             step = int(self.stepr / density)
             if step < 1:
-                log.warning("Actual Step size: %f" % step)
+                self.log.warning("Actual Step size: %f" % step)
             plt.pcolormesh(self.tpointsr[::step], self.phip, xdata[0:self.tsfinal:step].T, cmap=plt.get_cmap('gray'))
             plt.xlim(self.xlimr)
         else:
             step = int(self.step / density)
             if step < 1:
-                log.warning("Actual Step size: %f" % step)
+                self.log.warning("Actual Step size: %f" % step)
             plt.pcolormesh(self.d.tpoints[::step], self.phip, xdata[::step], cmap=plt.get_cmap('gray'))
             plt.xlim(self.xlim)
         plt.ylim(self.ylim)

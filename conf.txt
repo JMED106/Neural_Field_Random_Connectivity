@@ -174,5 +174,9 @@ Simulation:
     default:     False
     name:        "<gplot>"
     choices:     [True, False]
-
+  -Frq --freqAnalysis:
+    description: "Frequency analysis.."
+    default:     False
+    name:        "<freqA>"
+    choices:     [True, False]
     

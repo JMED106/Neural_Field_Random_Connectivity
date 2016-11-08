@@ -40,10 +40,8 @@ class Data:
     log = logger.getChild('Data')
 
     def __init__(self, l=100, n=1E5, eta0=0, j0=0.0, delta=1.0, t0=0.0, tfinal=50.0,
-                 dt=1E-3, delay=0.0, tau=1.0, faketau=20.0E-3, fp='lorentz', system='nf', debug=100):
+                 dt=1E-3, delay=0.0, tau=1.0, faketau=20.0E-3, fp='lorentz', system='nf'):
 
-        # ## Debugging ###
-        logger.setLevel(debug)
         # 0.1) Network properties:
         self.l = l
         self.dx = 2.0 * np.pi / np.float(l)
@@ -199,7 +197,6 @@ class Data:
         """ Loads initial conditions based on the parameters. It will try to load system that
             most closely resembles. The available systems are stored in a file.
         """
-        log = self.log.getChild('load_ic')
         # File path variables
         self.filepath = './init_conds/qif/'
         # TODO compute the fixed point taking into account the parameter space: HS or Bump?
@@ -217,11 +214,11 @@ class Data:
                     -self.delta / (2.0 * self.r0 * np.pi))
                 self.v_in[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (
                     -self.delta / (2.0 * self.r0 * np.pi))
-                log.info("Stationary firing rate: %f" % self.r0)
-                log.info("Stationary mean membrane potential: %f" % (-self.delta / (2.0 * self.r0 * np.pi)))
+                self.log.info("Stationary firing rate: %f" % self.r0)
+                self.log.info("Stationary mean membrane potential: %f" % (-self.delta / (2.0 * self.r0 * np.pi)))
 
         if system == 'qif' or system == 'both':
-            log.info("Loading initial conditions ... ")
+            self.log.info("Loading initial conditions ... ")
             if np.abs(j0) < 1E-2:
                 j0zero = 0.0
             else:
@@ -231,28 +228,28 @@ class Data:
             try:
                 self.spikes = np.load("%sic_qif_spikes_%s-%d.npy" % (self.filepath, self.fileprm, self.N))
                 self.matrix = np.load("%sic_qif_matrix_%s-%d.npy" % (self.filepath, self.fileprm, self.N))
-                log.info("Successfully loaded all data matrices.")
+                self.log.info("Successfully loaded all data matrices.")
             except IOError:
-                log.error("Files do not exist or cannot be read. Trying the most similar combination.")
+                self.log.error("Files do not exist or cannot be read. Trying the most similar combination.")
                 self.new_ic = True
             except ValueError:
-                log.critical("Not appropriate format of initial conditions. Check the files for logical errors...")
+                self.log.critical("Not appropriate format of initial conditions. Check the files for logical errors...")
                 exit(-1)
 
             # If the loading fails or new_ic is overridden we look for the closest combination in the data base
             database = None
             if self.new_ic is True:
-                log.warning(
-                    "WARNING: New initial conditions will be created, wait until the simulation has finished.")
+                self.log.warning(
+                    "New initial conditions will be created, wait until the simulation has finished.")
                 try:
                     database = np.load("%sinitial_conditions_%s.npy" % (self.filepath, self.fp))
                     if np.size(np.shape(database)) < 2:
                         database.resize((1, np.size(database)))
                     load = True
                 except IOError:
-                    log.error(
+                    self.log.error(
                         "Iinitial conditions database not found (%sinitial_conditions_%s)" % (self.filepath, self.fp))
-                    log.info("Loading random conditions.")
+                    self.log.info("Loading random conditions.")
                     load = False
 
                 # If the chosen combination is not in the database we create new initial conditions
@@ -270,24 +267,23 @@ class Data:
                     try:
                         self.spikes = np.load("%sic_qif_spikes_%s-%d.npy" % (self.filepath, self.fileprm2, n))
                         self.matrix = np.load("%sic_qif_matrix_%s-%d.npy" % (self.filepath, self.fileprm2, n))
-                        log.info("Successfully loaded all data matrices.")
+                        self.log.info("Successfully loaded all data matrices.")
                     except IOError:
-                        log.error("Files do not exist or cannot be read. This behavior wasn't expected ...")
+                        self.log.error("Files do not exist or cannot be read. This behavior wasn't expected ...")
                         exit(-1)
                     except ValueError:
-                        log.critical(
+                        self.log.critical(
                             "Not appropriate format of initial conditions. Check the files for logical errors...")
                         exit(-1)
                 else:  # Create new initial conditions from scratch (loading random conditions)
-                    log.info("Generating new initial conditions.\n"
-                             "Run the program using the same conditions after the process finishes.")
+                    self.log.info("Generating new initial conditions.\n"
+                             "\t\t\tRun the program using the same conditions after the process finishes.")
                     # We set excitatory and inhibitory neurons at the same initial conditions:
                     self.matrix[:, 0] = -0.1 * np.random.randn(self.N)
 
     def save_ic(self, temps):
-        log = self.log.getChild('save_ic')
         """ Function to save initial conditions """
-        log.info("Saving configuration for initial conditions ...")
+        self.log.info("Saving configuration for initial conditions ...")
         np.save("%sic_qif_spikes_%s-%d" % (self.filepath, self.fileprm, self.N), self.spikes)
         self.matrix[:, 1] = self.matrix[:, 1] - (temps - self.dt)
         np.save("%sic_qif_matrix_%s-%d.npy" % (self.filepath, self.fileprm, self.N), self.matrix)
@@ -296,7 +292,7 @@ class Data:
         try:
             db = np.load("%sinitial_conditions_%s.npy" % (self.filepath, self.fp))
         except IOError:
-            log.error(
+            self.log.error(
                 "Initial conditions database not found (%sinitial_conditions_%s.npy)" % (self.filepath, self.fp))
             logger.info("Creating database ...")
             db = False
@@ -463,7 +459,6 @@ class Connectivity:
 
     @staticmethod
     def frequencies(modes, data=None, eta=None, tau=None, delta=None, r0=None, ntype='ring-all', alpha=0.0, n=100):
-        log = logger.getChild('Connectivity.frequencies')
         """ Function that computes frequencies of decaying oscillations at the homogeneous state
         :param modes: array of modes, ordered from 0 to maximum wavenumber. If only zeroth mode is passed,
                       then it should be passed as an array. E.g. [1.0]. (J_0 = 1.0).
@@ -483,12 +478,12 @@ class Connectivity:
             j0 = data.j0
         # If not:
         elif (eta is None) or (tau is None) or (delta is None):
-            log.warning('Not enough data to compute frequencies')
+            logger.warning('Not enough data to compute frequencies')
             return None
         if r0 is None:  # We have to compute the firing rate at the stationary state
             if ntype == 'pecora':
                 r0 = Connectivity.rtheory(0, eta, delta)[0]
-                log.info("r0: %f" % r0)
+                logger.info("r0: %f" % r0)
             else:
                 r0 = Connectivity.rtheory(modes[0], eta, delta)
         r0u = r0 / tau
@@ -499,9 +494,9 @@ class Connectivity:
                     f.append(r0u * np.sqrt(1.0 - m / (2 * np.pi ** 2 * tau * r0u)))
                 else:
                     f.append(r0u * np.sqrt(m / (2 * np.pi ** 2 * tau * r0u) - 1.0))
-                    log.info("Fixed point is above the Saddle Node bifurcation for k = %d: there are not "
+                    logger.info("Fixed point is above the Saddle Node bifurcation for k = %d: there are not "
                              "decaying oscillations for the homogeneous state." % k)
-                    log.info(
+                    logger.info(
                         "These values plus the one corresponding to the decay are now the actual decays of overdamped "
                         "oscillations.")
         elif ntype == 'pecora':
@@ -595,7 +590,6 @@ class Connectivity:
         :param min: minimum connectivity weight (can be negative)
         :param max: maximum connectivity weight.
         """
-        log = logger.getChild('Connectivity.uniform_in_degree')
         aij = np.zeros((n, n))
         # Number of non-zero values
         d_n = int(n * degree) - 1
@@ -606,7 +600,7 @@ class Connectivity:
         else:
             a0 = (max - min) * np.random.rand(d_n) + min
             # noinspection PyUnresolvedReferences
-            log.info('The overall input is: %f' % np.add.reduce(a0))
+            logger.info('The overall input is: %f' % np.add.reduce(a0))
 
         a0 = np.concatenate((a0, np.zeros(n - d_n)))  # We complete using zeros
         np.random.shuffle(a0)  # Shuffle the vector
@@ -636,7 +630,6 @@ class Connectivity:
                     `->-'        `->-'        `->-'        `->-'
             See Pecora, PRE, 58,1. 1998
         """
-        log = logger.getChild('Connectivity.pecora1998_ex1')
         aij = np.zeros((n, n))
         aij[0, -1] = jc
         aij[0, 0] = jr
@@ -646,7 +639,7 @@ class Connectivity:
             aij[i] = np.roll(aij[0], i)
         # Compute eigenmodes and eigenvalues
         r0 = self.rtheory(0.0, eta, delta)[0]
-        log.info("Firing rate at the fix point (r*): %f" % (r0 / tau))
+        logger.info("Firing rate at the fix point (r*): %f" % (r0 / tau))
         # r02 = 1.0 / np.sqrt(np.pi**2*2.0) * np.sqrt(eta + np.sqrt(eta**2 + 1.0))
         v0 = -1.0 / (2 * np.pi * r0)
         J = np.array([[2 * v0, 2 * r0], [-2.0 * np.pi ** 2 * r0, 2 * v0]])
@@ -667,7 +660,7 @@ class Connectivity:
             for lmbd, vect in zip(eigen[0], eigen[1]):
                 if not np.isreal(vect[0]):
                     eigenvalues.append(lmbd)
-                    # log.info("Decay and Frequency of the %d mode: %f, %f" % (
+                    # logger.info("Decay and Frequency of the %d mode: %f, %f" % (
                     #     k, (np.real(lmbd) * tau), (np.imag(lmbd) / (2.0 * np.pi) / tau)))
             j = np.exp(2.0 * np.pi * 1.0j * np.arange(0, n) * k / n)
             # noinspection PyUnresolvedReferences
@@ -679,7 +672,7 @@ class Connectivity:
 class FiringRate:
     """ Class related to the measure of the firing rate of a neural network.
     """
-
+    log = logger.getChild('FiringRate')
     def __init__(self, data=None, swindow=1.0, sampling=0.01, points=None):
         # type: (Data(), float, float, int) -> object
 
@@ -711,16 +704,16 @@ class FiringRate:
 
         freemem = psutil.virtual_memory().available
         needmem = 8 * (self.wsteps + self.d.l) * data.N
-        print "Approximately %d MB of memory will be allocated for FR measurement." % (needmem / (1024 ** 2))
+        self.log.info("Approximately %d MB of memory will be allocated for FR measurement." % (needmem / (1024 ** 2)))
         if (freemem - needmem) / (1024 ** 2) <= 0:
-            print "MEMORY ERROR: not enough amount of memory available."
+            self.log.error("MEMORY ERROR: not enough amount of memory available.")
             exit(-1)
         elif (freemem - needmem) / (1024 ** 2) < 100:
-            print "CRITICAL WARNING: very few amount of memory will be left."
+            self.log.warning("CRITICAL WARNING: very few amount of memory will be left.")
             try:
                 raw_input("Continue? (any key to continue, CTRL+D to terminate).")
             except EOFError:
-                print "Terminating process."
+                self.log.critical("Terminating process.")
                 exit(-1)
 
         self.frspikes = 0 * np.zeros(shape=(data.N, self.wsteps))  # Secondary spikes matrix (for measuring)
