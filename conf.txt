@@ -160,10 +160,10 @@ Simulation:
     name:        "<no-save>"
     choices:     ~
   -db --debug:
-    description: "Debugging level. Default is info (20)."
-    default:     20
+    description: "Debugging level. Default is INFO."
+    default:     INFO
     name:        "<debug>"
-    choices:     ~
+    choices:     [DEBUG, INFO, ERROR, WARNING, CRITICAL]
   -pl --plot:
     description: "Saving minimal data and plotting."
     default:     False

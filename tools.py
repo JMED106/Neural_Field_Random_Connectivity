@@ -4,16 +4,14 @@ import os
 import numba
 import numpy as np
 from scipy.fftpack import fft
-from scipy.signal import argrelextrema, welch
+from scipy.signal import argrelextrema, welch, butter, lfilter
 import matplotlib.pyplot as plt
 
 from nflib import Data, Connectivity
 
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 __author__ = 'Jose M. Esnaola Acebes'
 
@@ -25,6 +23,10 @@ __author__ = 'Jose M. Esnaola Acebes'
     + A class that transforms a python dictionary into a python object (for easier usage).
 
 """
+
+# Constants
+pi = np.pi
+pi2 = np.pi * np.pi
 
 
 # Function that performs the integration (prepared for numba)
@@ -93,9 +95,11 @@ def find_nearest(array, value, ret='id'):
 class Perturbation:
     """ Tool to handle perturbations: time, duration, shape (attack, decay, sustain, release (ADSR), etc. """
 
-    def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None, debug=100,
-                 amplitude=1.0, attack='exponential', release='instantaneous', cntmodes=None, duration=None):
-        logger.setLevel(debug)
+    log = logger.getChild('Perturbation')
+
+    def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None, amplitude=1.0, attack='exponential',
+                 release='instantaneous', cntmodes=None, duration=None):
+        # self.logger.setLevel(debug)
         if data is None:
             self.d = Data()
         else:
@@ -136,13 +140,19 @@ class Perturbation:
         self.phi = np.linspace(-np.pi, np.pi, self.d.l)
         self.smod = self.sptprofile(modes, self.amp, cntmodes=cntmodes)
 
+        # Noisy perturbation: auxiliary matrix
+        self.auxMat = np.zeros((self.d.l, self.d.l / 10))
+        for i in xrange(self.d.l / 10):
+            self.auxMat[i * self.d.l / 10:(i + 1) * self.d.l / 10, i] = 1.0
+
     def sptprofile(self, modes, amp=1E-2, cntmodes=None):
         """ Gives the spatial profile of the perturbation: different wavelength and combinations
             of them can be produced.
         """
+        log = self.log.getChild('sptprofile')
         sprofile = 0.0
         if np.isscalar(modes):
-            logger.warning("'Modes' should be an iterable.")
+            log.warning("'Modes' should be an iterable.")
             modes = [modes]
         for m in modes:
             if cntmodes is None:
@@ -209,7 +219,8 @@ class SaveResults:
         # Parameters are store copying the configuration dictionary and other useful parameters (from the beginning)
         self.results['parameters'] = {'l': self.d.l, 'eta0': self.d.eta0, 'delta': self.d.delta, 'j0': self.d.j0,
                                       'tau': self.d.faketau, 'args': parameters}
-        self.results['connectivity'] = {'type': cnt.profile, 'cnt_ex': cnt.cnt_ex, 'cnt_in': cnt.cnt_in, 'cnt': cnt.cnt_ex + cnt.cnt_in,
+        self.results['connectivity'] = {'type': cnt.profile, 'cnt_ex': cnt.cnt_ex, 'cnt_in': cnt.cnt_in,
+                                        'cnt': cnt.cnt_ex + cnt.cnt_in,
                                         'eigenmodes': cnt.eigenmodes,
                                         'eigenvectors': cnt.eigenvectors, 'freqs': cnt.freqs}
         self.results['perturbation'] = {'t0': pert.t0}
@@ -225,7 +236,7 @@ class SaveResults:
         if system == 'nf' or system == 'both':
             self.results['nf'] = dict(fr=dict(), v=dict())
 
-    def create_dict(self, **kwargs):
+    def create_dict(self):
         tol = self.d.total_time * (1.0 / 100.0)
 
         for system in self.d.systems:
@@ -361,7 +372,8 @@ class FrequencySpectrum:
         """ Plotting parameters? Saving parameters?"""
         pass
 
-    def analyze(self, tdata, t0, t1, tau):
+    @staticmethod
+    def analyze(tdata, t0, t1, tau):
         """ This function takes all the time series and performs fft on it."""
         # Data
         num_points = len(tdata)
@@ -373,8 +385,9 @@ class FrequencySpectrum:
         tf = np.linspace(0, 1.0 / (2.0 * dt), num_points / 2)
         yf = 2.0 / num_points * np.abs(fft(tdata)[0:num_points / 2])
         # 70 va bastante bien
-        yf2 = welch(tdata, fs=1.0 / (tau * dt), nperseg=1024 * 80)
-        plt.plot(yf2[0], yf2[1])
+        yf2 = welch(tdata, fs=1.0 / (tau * dt), nperseg=1024 * 50)
+        plt.plot(tf[10:] / tau, yf[10:])
+        # plt.plot(yf2[0], yf2[1])
         plt.xlim([0, 100])
         plt.show()
         # exit(-1)
@@ -384,12 +397,8 @@ class FrequencySpectrum:
         # freqs_rescaled = tf[index_freqs]
         # freqs = tf[index_freqs] / tau
 
-
-        # self.plotdata(t, tdata, tf/(tau), yf)
-        pass
-        # return freqs
-
-    def freqbyhand(self, tdata, t0, t1, tau, v0=None):
+    @staticmethod
+    def freqbyhand(tdata, t0, t1, tau, v0=None):
         """ Computes the frequency by detecting the maxims of amplitudes
             in a given time series and dividing by time.
         """
@@ -413,6 +422,43 @@ class FrequencySpectrum:
         plt.grid()
         plt.show()
 
+    @staticmethod
+    def butter_bandpass(lowcut, highcut, fs, order=5):
+        nyq = 0.5 * fs
+        low = lowcut / nyq
+        high = highcut / nyq
+        b, a = butter(order, [low, high], btype='band')
+        return b, a
+
+    def butter_bandpass_filter(self, data, lowcut, highcut, fs, order=5):
+        b, a = self.butter_bandpass(lowcut, highcut, fs, order=order)
+        y = lfilter(b, a, data)
+        return y
+
+    @staticmethod
+    def butter_lowpass(cutoff, fs, order=5):
+        nyq = 0.5 * fs
+        normal_cutoff = cutoff / nyq
+        b, a = butter(order, normal_cutoff, btype='low', analog=False)
+        return b, a
+
+    def butter_lowpass_filter(self, data, cutoff, fs, order=5):
+        b, a = self.butter_lowpass(cutoff, fs, order=order)
+        y = lfilter(b, a, data)
+        return y
+
+    @staticmethod
+    def butter_highpass(cutoff, fs, order=5):
+        nyq = 0.5 * fs
+        normal_cutoff = cutoff / nyq
+        b, a = butter(order, normal_cutoff, btype='high', analog=False)
+        return b, a
+
+    def butter_highpass_filter(self, data, cutoff, fs, order=5):
+        b, a = self.butter_highpass(cutoff, fs, order=order)
+        y = lfilter(b, a, data)
+        return y
+
 
 class DictToObj(object):
     """Class that transforms a dictionary d into an object. Note that dictionary keys must be
@@ -428,3 +474,48 @@ class DictToObj(object):
                 setattr(self, a, [DictToObj(x) if isinstance(x, dict) else x for x in b])
             else:
                 setattr(self, a, DictToObj(b) if isinstance(b, dict) else b)
+
+
+class ColorPlot:
+    log = logger.getChild('ColorPlot')
+
+    def __init__(self, data=None, tfinal=12.0):
+        if data is None:
+            self.d = Data()
+        else:
+            self.d = data
+
+        self.phi = np.linspace(-pi, pi, self.d.l)
+        self.phip = np.linspace(-pi, pi, self.d.l + 1)
+
+        self.xlim = np.array([self.d.t0, self.d.total_time]) * self.d.faketau
+        self.xlimr = np.array([self.d.t0, tfinal]) * self.d.faketau
+
+        self.ylim = [-pi, pi]
+
+        numpoints_max = 1000
+        self.step = self.d.nsteps / numpoints_max
+        self.stepr = (self.xlimr[-1] - self.xlimr[0]) / self.d.dt / numpoints_max
+        if self.stepr < 1:
+            self.stepr = 1
+        self.log.debug("Step size: %f\t Step size of the reduce plot: %f" % (self.step, self.stepr))
+
+        self.tpointsr = np.arange(self.d.t0, tfinal, self.d.dt) * self.d.faketau
+        self.tsfinal = np.size(self.tpointsr)
+
+    def cplot(self, xdata, density=1.0, paper=True):
+        log = self.log.getChild('cplot')
+        if paper:
+            step = int(self.stepr / density)
+            if step < 1:
+                log.warning("Actual Step size: %f" % step)
+            plt.pcolormesh(self.tpointsr[::step], self.phip, xdata[0:self.tsfinal:step].T, cmap=plt.get_cmap('gray'))
+            plt.xlim(self.xlimr)
+        else:
+            step = int(self.step / density)
+            if step < 1:
+                log.warning("Actual Step size: %f" % step)
+            plt.pcolormesh(self.d.tpoints[::step], self.phip, xdata[::step], cmap=plt.get_cmap('gray'))
+            plt.xlim(self.xlim)
+        plt.ylim(self.ylim)
+        plt.show()

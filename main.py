@@ -7,7 +7,7 @@ from timeit import default_timer as timer
 import progressbar as pb
 import numpy as np
 from nflib import Data, FiringRate, Connectivity
-from tools import qifint, TheoreticalComputations, SaveResults, Perturbation, noise, FrequencySpectrum
+from tools import qifint, TheoreticalComputations, SaveResults, Perturbation, noise, FrequencySpectrum, ColorPlot
 
 import logging
 
@@ -16,11 +16,6 @@ import Gnuplot
 # Use this option to turn off fifo if you get warnings like:
 # line 0: warning: Skipping unreadable file "/tmp/tmpakexra.gnuplot/fifo"
 Gnuplot.GnuplotOpts.prefer_fifo_data = 0
-
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-# logger.setLevel(logging.DEBUG)
 
 __author__ = 'jm'
 
@@ -39,8 +34,16 @@ pi2 = np.pi * np.pi
 # We first try to parse optional configuration files:
 fparser = argparse.ArgumentParser(add_help=False)
 fparser.add_argument('-f', '--file', default="conf.txt", dest='-f', metavar='<file>')
+fparser.add_argument('-db', '--debug', default="INFO", dest='db', metavar='<debug>',
+                     choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
 farg = fparser.parse_known_args()
 conffile = vars(farg[0])['-f']
+# ####### Debugging #########
+debug = getattr(logging, vars(farg[0])['db'].upper(), None)
+if not isinstance(debug, int):
+    raise ValueError('Invalid log level: %s' % vars(farg[0])['db'])
+logging.basicConfig(level=getattr(logging, vars(farg[0])['db'].upper()))
+logger = logging.getLogger(__name__)
 
 # We open the configuration file to load parameters (not optional)
 try:
@@ -62,10 +65,7 @@ for group in options:
     for key in options[group]:
         flags = key.split()
         args = options[group]
-        logger.debug("flag: %4s\t default: %13s\t %s" % (
-            flags[0][1:], str(args[key]['default']), str(type(args[key]['default']))))
         if isinstance(args[key]['default'], bool):
-            logger.debug(args[key]['default'])
             gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
                             action='store_true')
         else:
@@ -77,14 +77,11 @@ for group in options:
 opts = parser.parse_args(farg[1])
 args = parser.parse_args(farg[1], namespace=ops)
 
-# ####### Debugging #########
-logger.setLevel(args.db)
-
 # ##################################################################################
 # 0) PREPARE FOR CALCULATIONS
 # 0.1) Load data object:
 d = Data(l=args.n, n=args.N, eta0=args.e, j0=args.j, delta=args.d, tfinal=args.T, system=args.s, fp=args.D,
-         debug=args.db, dt=args.dt)
+         debug=debug, dt=args.dt)
 
 # 0.2) Create connectivity matrix and extract eigenmodes
 c = Connectivity(d.l, profile=args.c, fsmodes=args.jk, amplitude=10.0, data=d, degree=args.dg, saved=True)
@@ -105,7 +102,7 @@ if d.system != 'nf':
 
 # 0.5) Set perturbation configuration
 p = Perturbation(data=d, dt=args.pt, modes=args.m, amplitude=float(args.a), attack=args.A, cntmodes=c.eigenvectors,
-                 t0=args.pt0, debug=args.db)
+                 t0=args.pt0)
 
 # 0.6) Define saving paths:
 sr = SaveResults(data=d, cnt=c, pert=p, system=d.system, parameters=opts)
@@ -144,7 +141,8 @@ while temps < d.tfinal:
     # Noisy perturbation
     if args.ns and not d.new_ic:
         if tstep % 1 == 0:
-            nois = np.sqrt(2.0 * d.dt / d.tau * args.nD) * np.random.randn(d.l)
+            nois = np.sqrt(2.0 * d.dt / d.tau * args.nD) * np.random.randn(d.l / 10)
+            nois = np.dot(p.auxMat, nois)
         else:
             nois = 0.0
 
@@ -199,7 +197,8 @@ while temps < d.tfinal:
         d.r_ex[kp] = d.r_ex[k] + d.dt * (d.delta / pi + 2.0 * d.r_ex[k] * d.v_ex[k])
         d.v_ex[kp] = d.v_ex[k] + d.dt * (d.v_ex[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_ex[k] ** 2 + p.it[kp])
         d.r_in[kp] = d.r_in[k] + d.dt * (d.delta / pi + 2.0 * d.r_in[k] * d.v_in[k])
-        d.v_in[kp] = d.v_in[k] + d.dt * (d.v_in[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_in[k] ** 2 + args.sym * p.it[kp])
+        d.v_in[kp] = d.v_in[k] + d.dt * (
+            d.v_in[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_in[k] ** 2 + args.sym * p.it[kp])
 
     # Perturbation at certain time
     if int(p.t0 / d.dt) == tstep:
@@ -224,6 +223,10 @@ logger.info("Stationary mean membrane potential (excitatory and inhibitory): %f,
 tstep -= 1
 temps -= d.dt
 # th.thdist = th.theor_distrb(d.sphi[kp])
+
+# Frequency analysis
+F.analyze(d.r_ex[:, d.l / 2] - d.r0, 0.0, d.tfinal, d.faketau)
+# y = F.butter_bandpass_filter(d.r_ex[:, d.l/2]/d.faketau - d.r0/d.faketau, 20.0, 100.0, 1.0/ (d.dt*d.faketau), order=3)
 
 # Save initial conditions
 if d.new_ic:
@@ -251,33 +254,29 @@ if not args.nos:
 
 # Save just some data and plot
 if args.pl:
-    pass
+    plot = ColorPlot(data=d)
+    plot.cplot(d.r_ex)
 
 # # # Preliminary plotting with gnuplot
 if args.gpl:
+    gpllog = logger.getChild('gnuplot')
     if d.nsteps > 10E6:
-        points = d.nsteps/10E6
+        points = d.nsteps / 10E6
         if points <= 1:
             points = 10
     else:
         points = 1
-    logger.info(points)
+    gpllog.info("Plotting every %d points", points)
     gp = Gnuplot.Gnuplot(persist=1)
-    p1_in = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r_ex[::points, d.l / 2] / d.faketau], with_='lines')
-    # p1_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r_in[::points, d.l / 2] / d.faketau], with_='lines')
-    # p1_exin = Gnuplot.PlotItems.Data(
-    #     np.c_[d.tpoints[::points] * d.faketau, (d.r_in[::points, d.l / 2] + d.r_ex[::points, d.l / 2]) / 2.0 / d.faketau], with_='lines')
-    # p1v_in = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.v_ex[::points, d.l / 2] / d.faketau], with_='lines')
-    # p1v_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.v_in[::points, d.l / 2] / d.faketau], with_='lines')
-    # p11_in = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r_ex[::points, d.l / 4] / d.faketau], with_='lines')
-    # p11_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r_in[::points, d.l / 4] / d.faketau], with_='lines')
-    # p11_exin = Gnuplot.PlotItems.Data(
-    #     np.c_[d.tpoints[::points] * d.faketau, (d.r_in[::points, d.l / 4] + d.r_ex[::points, d.l / 4]) / 2.0 / d.faketau], with_='lines')
+    p1_in = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r_ex[::points, d.l / 2] / d.faketau],
+                                   with_='lines')
     if args.s != 'nf':
-        p2 = Gnuplot.PlotItems.Data(np.c_[np.array(fr.tempsfr) * d.faketau, np.array(fr.r)[::points, d.l / 2] / d.faketau],
-                                    with_='lines')
+        p2 = Gnuplot.PlotItems.Data(
+            np.c_[np.array(fr.tempsfr) * d.faketau, np.array(fr.r)[::points, d.l / 2] / d.faketau],
+            with_='lines')
     else:
-        p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, p.it[::points, d.l / 2] + d.r0 / d.faketau], with_='lines')
+        p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, p.it[::points, d.l / 2] + d.r0 / d.faketau],
+                                    with_='lines')
     # gp.plot(p1_ex, p1_in, p1_exin)
     gp.plot(p1_in, p2)
     # gp2 = Gnuplot.Gnuplot(persist=1)
