@@ -12,7 +12,7 @@ Perturbation:
     choices:     ~
   -a --amplitude:
     description: "Amplitude of the perturbation."
-    default:     1.0
+    default:     10.0
     name:        "<amplitude>"
     choices:     ~
   -sym --symmetry:
@@ -22,7 +22,7 @@ Perturbation:
     choices:     ~
   -pt --pulseDt:
     description: "Duration of the pulse (a.u.)"
-    default:     1.0
+    default:     0.5
     name:        "<pdt>"
     choices:     ~
   -pt0 --pulset0:
@@ -40,6 +40,16 @@ Perturbation:
     default:     'exponential'
     name:        "<release>"
     choices:     ['exponential', 'instantaneous']
+  -pV --pertVoltages:
+    description: "Perturbation done by translation of voltages."
+    default:     False
+    name:        "<pert-Volts>"
+    choices:     [False, True]
+  -pD --pertDisplacement:
+    description: "Displacement of mean potential."
+    default:     0.1
+    name:        "<pert-disp>"
+    choices:     ~
 Noise:
   -ns --noise:
     description: "Spatial noise boolean."
@@ -54,7 +64,7 @@ Noise:
 QIF:
   -e --eta:
     description: "External current."
-    default:     4.0
+    default:     5.0
     name:        "<eta>"
     choices:     ~
   -tm --taum:
@@ -80,7 +90,7 @@ QIF:
 Network:
   -c --cprofile:
     description: "Connectivity matrix style."
-    default:     'pecora1'
+    default:     'fs'
     name:        "<cnt>"
     choices:     ['uniform', 'mex-hat', 'fs', 'pecora1']
   -j --coupling:
@@ -95,12 +105,12 @@ Network:
     choices:     ~
   -N --popsize:
     description: "Number of neurons for the qif system."
-    default:     200000
+    default:     500000
     name:        "<N>"
     choices:     ~
   -n --nodes:
     description: "Number of nodes in the network."
-    default:     4
+    default:     100
     name:        "<n>"
     choices:     ~
   -dg --degree:
@@ -141,7 +151,7 @@ Simulation:
     choices:     ['qif', 'nf', 'both']
   -T --ttime:
     description: "Total time of simulation (in dt time, a.u.)."
-    default:     20.0
+    default:     15.0
     name:        "<time>"
     choices:     ~
   -dt --timestep:

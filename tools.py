@@ -1,6 +1,7 @@
 import datetime
 import os
 
+import logging
 import numba
 import numpy as np
 from scipy.fftpack import fft
@@ -9,9 +10,7 @@ import matplotlib.pyplot as plt
 
 from nflib import Data, Connectivity
 
-import logging
-
-logger = logging.getLogger(__name__)
+logging.getLogger('tools').addHandler(logging.NullHandler())
 
 __author__ = 'Jose M. Esnaola Acebes'
 
@@ -94,11 +93,9 @@ def find_nearest(array, value, ret='id'):
 
 class Perturbation:
     """ Tool to handle perturbations: time, duration, shape (attack, decay, sustain, release (ADSR), etc. """
-
-    log = logger.getChild('Perturbation')
-
     def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None, amplitude=1.0, attack='exponential',
                  release='instantaneous', cntmodes=None, duration=None):
+        self.logger = logging.getLogger('tools.Perturbation')
         if data is None:
             self.d = Data()
         else:
@@ -144,13 +141,19 @@ class Perturbation:
         for i in xrange(self.d.l / 10):
             self.auxMat[i * self.d.l / 10:(i + 1) * self.d.l / 10, i] = 1.0
 
+        # Displacement perturbation: auxiliary matrix
+        if 'qif' in self.d.systems:
+            self.auxMatD = np.zeros((self.d.Ne, self.d.l))
+            for i in xrange(self.d.l):
+                self.auxMatD[i * self.d.l:(i + 1) * self.d.l, i] = 1.0
+
     def sptprofile(self, modes, amp=1E-2, cntmodes=None):
         """ Gives the spatial profile of the perturbation: different wavelength and combinations
             of them can be produced.
         """
         sprofile = 0.0
         if np.isscalar(modes):
-            self.log.warning("'Modes' should be an iterable.")
+            self.logger.warning("'Modes' should be an iterable.")
             modes = [modes]
         for m in modes:
             if cntmodes is None:
@@ -178,7 +181,7 @@ class Perturbation:
                     self.input = (self.trmod - self.trmod0) * self.smod
                 elif self.attack == 'instantaneous':
                     if temps >= self.t0:
-                        self.input = self.amp * self.smod
+                        self.input = 1.0 * self.smod
         elif self.ptype == 'oscillatory':
             if temps >= self.t0 + self.dt:
                 self.trmod = self.amp * np.sin(self.t * 1.0 * freq * 2.0 * np.pi)
@@ -191,8 +194,8 @@ class Perturbation:
 class SaveResults:
     """ Save Firing rate data to be plotted or to be loaded with numpy.
     """
-
     def __init__(self, data=None, cnt=None, pert=None, path='results', system='nf', parameters=None):
+        self.logger = logging.getLogger('tools.SaveResults')
         if data is None:
             self.d = Data()
         else:
@@ -230,7 +233,7 @@ class SaveResults:
 
         if system == 'qif' or system == 'both':
             self.results['qif'] = dict(fr=dict(), v=dict())
-            self.results['parameters']['qif'] = {'N': self.d.N}
+            self.results['parameters']['qif'] = {'N': self.d.N, 'Ne': self.d.Ne, 'Ni': self.d.Ni}
         if system == 'nf' or system == 'both':
             self.results['nf'] = dict(fr=dict(), v=dict())
 
@@ -248,6 +251,7 @@ class SaveResults:
         now = datetime.datetime.now().timetuple()[0:6]
         sday = "-".join(map(str, now[0:3]))
         shour = "_".join(map(str, now[3:]))
+        self.logger.info("Saving data into %s/data_%s-%s" % (self.path, sday, shour))
         np.save("%s/data_%s-%s" % (self.path, sday, shour), self.results)
 
     def time_series(self, ydata, filename, export=False, xdata=None):
@@ -383,9 +387,11 @@ class FrequencySpectrum:
         tf = np.linspace(0, 1.0 / (2.0 * dt), num_points / 2)
         yf = 2.0 / num_points * np.abs(fft(tdata)[0:num_points / 2])
         # 70 va bastante bien
-        yf2 = welch(tdata, fs=1.0 / (tau * dt), nperseg=1024 * 50)
-        plt.plot(tf[10:] / tau, yf[10:])
-        # plt.plot(yf2[0], yf2[1])
+        yf2 = welch(tdata, fs=1.0 / (tau * dt), nperseg=1024 * 70)
+        # plt.plot(tf[10:] / tau, yf[10:])
+        # plt.xlim([0, 100])
+        # plt.show()
+        plt.plot(yf2[0], yf2[1])
         plt.xlim([0, 100])
         plt.show()
         # exit(-1)
@@ -394,6 +400,7 @@ class FrequencySpectrum:
         # index_freqs = index_peaks[(yf[index_peaks] >= max_peak / 10.0)]
         # freqs_rescaled = tf[index_freqs]
         # freqs = tf[index_freqs] / tau
+        # return (yf2[0], yf2[1])
 
     @staticmethod
     def freqbyhand(tdata, t0, t1, tau, v0=None):
@@ -475,9 +482,8 @@ class DictToObj(object):
 
 
 class ColorPlot:
-    log = logger.getChild('ColorPlot')
-
     def __init__(self, data=None, tfinal=12.0):
+        self.logger = logging.getLogger('tools.ColorPlot')
         if data is None:
             self.d = Data()
         else:
@@ -496,23 +502,32 @@ class ColorPlot:
         self.stepr = (self.xlimr[-1] - self.xlimr[0]) / self.d.dt / numpoints_max
         if self.stepr < 1:
             self.stepr = 1
-        self.log.debug("Step size: %f\t Step size of the reduce plot: %f" % (self.step, self.stepr))
+        self.logger.debug("Step size: %f\t Step size of the reduce plot: %f" % (self.step, self.stepr))
 
         self.tpointsr = np.arange(self.d.t0, tfinal, self.d.dt) * self.d.faketau
         self.tsfinal = np.size(self.tpointsr)
 
     def cplot(self, xdata, density=1.0, paper=True):
+        xdata = xdata/self.d.faketau
         if paper:
             step = int(self.stepr / density)
             if step < 1:
-                self.log.warning("Actual Step size: %f" % step)
-            plt.pcolormesh(self.tpointsr[::step], self.phip, xdata[0:self.tsfinal:step].T, cmap=plt.get_cmap('gray'))
+                self.logger.warning("Actual Step size: %f" % step)
+            pcolor = plt.pcolormesh(self.tpointsr[::step], self.phip, xdata[0:self.tsfinal:step].T, cmap=plt.get_cmap('gray'))
             plt.xlim(self.xlimr)
         else:
             step = int(self.step / density)
             if step < 1:
-                self.log.warning("Actual Step size: %f" % step)
-            plt.pcolormesh(self.d.tpoints[::step], self.phip, xdata[::step], cmap=plt.get_cmap('gray'))
+                self.logger.warning("Actual Step size: %f" % step)
+            pcolor = plt.pcolormesh(self.d.tpoints[::step], self.phip, xdata[::step], cmap=plt.get_cmap('gray'))
             plt.xlim(self.xlim)
         plt.ylim(self.ylim)
+        cbar = plt.colorbar(pcolor)
         plt.show()
+
+    @staticmethod
+    def filter(xdata):
+        (t, l) = np.shape(xdata)
+        x_mean_phi = xdata.mean(axis=1)
+        x_filter = xdata - np.dot(x_mean_phi.reshape((t,1)), np.ones((1,l)))
+        return x_filter
