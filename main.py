@@ -5,6 +5,7 @@ import yaml
 import sys
 
 import logging.config
+from colorlog import ColoredFormatter
 from timeit import default_timer as timer
 import progressbar as pb
 import numpy as np
@@ -43,27 +44,38 @@ debug = getattr(logging, vars(farg[0])['db'].upper(), None)
 if not isinstance(debug, int):
     raise ValueError('Invalid log level: %s' % vars(farg[0])['db'])
 
-logging.config.fileConfig('logging.conf')
-handlers = logging.root.handlers
-handlers[0].setLevel(debug)
-logger = logging.getLogger('simulation')
+logformat = "%(log_color)s[%(levelname)-7.8s]%(reset)s %(name)-12.12s:%(funcName)-8.8s: " \
+            "%(log_color)s%(message)s%(reset)s"
+formatter = ColoredFormatter(logformat, log_colors={
+    'DEBUG': 'cyan',
+    'INFO': 'white',
+    'WARNING': 'yellow',
+    'ERROR': 'red',
+    'CRITICAL': 'red,bg_white',
+})
 
+logging.config.dictConfig(yaml.load(file('logging.conf', 'rstored')))
+handler = logging.root.handlers[0]
+handler.setLevel(debug)
+handler.setFormatter(formatter)
+logger = logging.getLogger('simulation')
 
 # We open the configuration file to load parameters (not optional)
 try:
     options = yaml.load(file(conffile, 'rstored'))
 except IOError:
-    print "The configuration file '%s' is missing" % conffile
+    logger.error("The configuration file '%s' is missing" % conffile)
     exit(-1)
 except yaml.YAMLError, exc:
-    print "Error in configuration file:", exc
+    logger.error("Error in configuration file:", exc)
     exit(-1)
 
 # We load parameters from the dictionary of the conf file and add command line options (2nd parsing)
 parser = argparse.ArgumentParser(
     description='Simulator of a network of ensembles of all-to-all QIF neurons.',
     usage='python %s [-O <options>]' % sys.argv[0])
-
+print "\n******************************************************************"
+logger.info('Simulator of a network of ensembles of all-to-all QIF neurons.')
 for group in options:
     gr = parser.add_argument_group(group)
     for key in options[group]:
@@ -72,6 +84,10 @@ for group in options:
         if isinstance(args[key]['default'], bool):
             gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
                             action='store_true')
+        elif isinstance(args[key]['default'], list):
+            gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
+                            metavar=args[key]['name'], type=int,
+                            choices=args[key]['choices'], nargs='+')
         else:
             gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
                             metavar=args[key]['name'], type=type(args[key]['default']),
@@ -100,7 +116,7 @@ if args.ic:
     d.new_ic = True
 
 # 0.4) Load Firing rate class in case qif network is simulated
-if d.system != 'nf':
+if d.system != 'nf' and not d.new_ic:
     fr = FiringRate(data=d, swindow=0.5, sampling=0.05)
 
 # 0.5) Set perturbation configuration
@@ -108,7 +124,7 @@ if d.system != 'nf':
 if args.m == -1:
     args.m = range(0, 10)
 p = Perturbation(data=d, dt=args.pt, modes=args.m, amplitude=float(args.a), attack=args.A, cntmodes=c.eigenvectors,
-                 t0=args.pt0)
+                 t0=args.pt0, stype=args.sP)
 if args.pV:
     p.amp = 0.0
 
@@ -176,12 +192,14 @@ while temps < d.tfinal:
             noise_E = np.sqrt(2.0 * d.dt / d.tau * d.delta) * noise(d.Ne)
             noise_I = np.sqrt(2.0 * d.dt / d.tau * d.delta) * noise(d.Ni)
 
-            # Excitatory
-        d.matrixE = qifint(d.matrixE, d.matrixE[:, 0], d.matrixE[:, 1], d.etaE + d.tau / d.dt * noise_E, s + p.input,
+        # Excitatory
+        d.matrixE = qifint(d.matrixE, d.matrixE[:, 0], d.matrixE[:, 1], d.etaE + d.tau / d.dt * noise_E,
+                           s + p.input,
                            temps, d.Ne, d.dNe, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
         # Inhibitory
-        d.matrixI = qifint(d.matrixI, d.matrixI[:, 0], d.matrixI[:, 1], d.etaI + d.tau / d.dt * noise_I, s, temps, d.Ni,
-                           d.dNi, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
+        d.matrixI = qifint(d.matrixI, d.matrixI[:, 0], d.matrixI[:, 1], d.etaI + d.tau / d.dt * noise_I,
+                           s + args.sym * p.input,
+                           temps, d.Ni, d.dNi, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
 
         # Prepare spike matrices for Mean-Field computation and firing rate measure
         # Excitatory
@@ -247,8 +265,10 @@ pbar.finish()
 # Stop the timer
 print 'Total time: {}.'.format(timer() - time1)
 
-logger.info("Stationary firing rate (excitatory and inhibitory): %f, %f" % (d.r_ex[kp, 0], d.r_in[kp, 0]))
-logger.info("Stationary mean membrane potential (excitatory and inhibitory): %f, %f" % (d.v_ex[kp, 0], d.v_in[kp, 0]))
+###################################################################################
+# 2) Post-Simulation, saving, plotting, analayzing.
+logger.debug("Stationary firing rate (excitatory and inhibitory): %f, %f" % (d.r_ex[kp, 0], d.r_in[kp, 0]))
+logger.debug("Stationary mean membrane potential (excitatory and inhibitory): %f, %f" % (d.v_ex[kp, 0], d.v_in[kp, 0]))
 
 # Compute distribution of firing rates of neurons
 tstep -= 1
@@ -259,8 +279,8 @@ temps -= d.dt
 if args.Frq:
     plot = ColorPlot(data=d)
     phi = d.l / 2
-    F.analyze(d.r_ex[:, phi] - d.r0, 0.0, d.tfinal, d.faketau)
-    F.analyze(plot.filter(d.r_ex - d.r0)[:, phi], 0.0, d.tfinal, d.faketau)
+    F.analyze(d.r_ex[:, phi] - d.r0, 0.0, d.tfinal, d.faketau, method='all')
+    F.analyze(plot.filter(d.r_ex - d.r0)[:, phi], 0.0, d.tfinal, d.faketau, method='all')
     #
     # freqs = None
     # yf = 0
@@ -319,7 +339,7 @@ if args.pl:
     plot.cplot(d.r_ex)
     plot.cplot(plot.filter(d.r_ex))
 
-# # # Preliminary plotting with gnuplot
+# Preliminary plotting with gnuplot
 if args.gpl:
     gpllog = logger.getChild('gnuplot')
     if d.nsteps > 10E6:

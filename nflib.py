@@ -42,6 +42,7 @@ class Data:
                  dt=1E-3, delay=0.0, tau=1.0, faketau=20.0E-3, fp='lorentz', system='nf'):
 
         self.logger = logging.getLogger('nflib.Data')
+        self.logger.debug("Creating data structure.")
         # 0.1) Network properties:
         self.l = l
         self.dx = 2.0 * np.pi / np.float(l)
@@ -86,6 +87,7 @@ class Data:
         if system == 'nf' or system == 'both':
             self.systems.append('nf')
 
+        self.logger.debug("Simulating %s system(s)." % self.systems)
         # 0.8) QIF model parameters
         if system != 'nf':
             self.logger.info("Loading QIF parameters:")
@@ -189,7 +191,6 @@ class Data:
             self.spikes_e_mod = np.ones(shape=(self.Ne, self.spiketime)) * 0  # Spike matrix (Ne x (T_syn + tpeak/dt))
             self.spikes_i_mod = np.ones(shape=(self.Ni, self.spiketime)) * 0  # Spike matrix (Ni x (T_syn + tpeak/dt))
 
-            # Auxiliary matrix
             # Auxiliary matrixes
             self.auxMatE = np.zeros((l, self.Ne))
             self.auxMatI = np.zeros((l, self.Ni))
@@ -231,6 +232,7 @@ class Data:
         self.r0 = Connectivity.rtheory(j0, self.eta0, self.delta)
 
         if system == 'nf' or system == 'both':
+            self.logger.debug("Setting %s systems initial conditions (theoretical)." % 'nf')
             self.fileprm = '%.2lf-%.2lf-%.2lf-%d' % (j0, self.eta0, self.delta, self.l)
             if len(self.v_ex[:, 0]) == 2:
                 self.v_ex[-1, :] = np.ones(self.l) * (-self.delta / (2.0 * self.r0 * np.pi))
@@ -242,8 +244,8 @@ class Data:
                     -self.delta / (2.0 * self.r0 * np.pi))
                 self.v_in[(self.nsteps - 1) % self.nsteps, :] = np.ones(self.l) * (
                     -self.delta / (2.0 * self.r0 * np.pi))
-                self.logger.info("Stationary firing rate: %f" % self.r0)
-                self.logger.info("Stationary mean membrane potential: %f" % (-self.delta / (2.0 * self.r0 * np.pi)))
+                self.logger.debug("Stationary firing rate: %f" % self.r0)
+                self.logger.debug("Stationary mean membrane potential: %f" % (-self.delta / (2.0 * self.r0 * np.pi)))
 
         if system == 'qif' or system == 'both':
             self.logger.info("Loading initial conditions ... ")
@@ -271,6 +273,8 @@ class Data:
             if self.new_ic is True:
                 self.logger.warning(
                     "New initial conditions will be created, wait until the simulation has finished.")
+                self.logger.info("Generating new initial conditions.\n"
+                                 "\t\t\t\t Run the program using the same conditions after the process finishes.")
                 try:
                     database = np.load("%sinitial_conditions_%s.npy" % (self.filepath, self.fp))
                     if np.size(np.shape(database)) < 2:
@@ -309,8 +313,6 @@ class Data:
                             "Not appropriate format of initial conditions. Check the files for logical errors...")
                         exit(-1)
                 else:  # Create new initial conditions from scratch (loading random conditions)
-                    self.logger.info("Generating new initial conditions.\n"
-                             "\t\t\tRun the program using the same conditions after the process finishes.")
                     # We set excitatory and inhibitory neurons at the same initial conditions:
                     self.matrixE[:, 0] = -0.1 * np.random.randn(self.Ne)
                     self.matrixI[:, 0] = 1.0 * self.matrixE[:, 0]
@@ -327,6 +329,7 @@ class Data:
 
         # Introduce this combination into the database
         try:
+            self.logger.debug("Loading inital conditions database.")
             db = np.load("%sinitial_conditions_%s.npy" % (self.filepath, self.fp))
         except IOError:
             self.logger.error(
@@ -337,6 +340,7 @@ class Data:
             np.save("%sinitial_conditions_%s" % (self.filepath, self.fp),
                     np.array([self.l, self.j0, self.eta0, self.delta, self.Ne, self.Ni]))
         else:
+            self.logger.debug("Resizing database and appending new combination.")
             db.resize(np.array(np.shape(db)) + [1, 0], refcheck=False)
             db[-1] = np.array([self.l, self.j0, self.eta0, self.delta, self.Ne, self.Ni])
             np.save("%sinitial_conditions_%s" % (self.filepath, self.fp), db)
@@ -393,8 +397,10 @@ class Connectivity:
         del i_n, j_n  # Make sure you delete these matrices here !!!
         self.profile = profile
         # Type of connectivity (profile=['mex-hat', 'General Fourier Series: fs'])
+        self.log.debug("Connectivity type: %s" % profile)
         if profile == 'mex-hat':
             if (refmode is not None) and (refamp is not None):  # A reference mode has been selected
+                self.log.debug("Reference mode %d with amplitude %f selected" % (refmode, refamp))
                 # Generate connectivity function here using reference amplitude
                 (self.je, self.me, self.ji, self.mi) = self.searchmode(refmode, refamp, me, mi)
             else:
@@ -412,9 +418,11 @@ class Connectivity:
             # Generate fourier series with modes fsmodes
             if fsmodes is None:
                 fsmodes = 10.0 * np.array([0, 1, 0.75, -0.25])  # Default values
+                self.log.debug("Creating default connectivity %s" % str(fsmodes))
                 fsmodes_ex = 10.0 * np.array([0.75 * 2.0, 1, 0.75, -0.25])  # Default values
                 fsmodes_in = 10.0 * np.array([-0.75 * 2.0, 0.0, 0.0, 0.0])  # Default values
             else:
+                self.log.debug("Creating custom connectivity %s" % str(fsmodes))
                 fsmodes_ex = list(fsmodes)
                 fsmodes_in = [0.0, 0.0]
                 maxmode = np.max(fsmodes)
@@ -432,12 +440,14 @@ class Connectivity:
         elif profile == 'uniform':
             aij = None
             if saved:
+                self.log.debug("Loading connectivity matrix...")
                 try:
                     aij = np.load("cnt.npy")
                     np.reshape(aij, (length, length))
                 except (IOError, ValueError) as e:
                     self.log.error(e)
                     aij = self.uniform_in_degree(length, degree)
+                    self.log.debug("Creating new connectibity matrix.")
             self.cnt = data.j0 * aij
             self.log.debug("Connectivity matrix:\n%s" % str(self.cnt))
             # For Hermitian matrices self.modes = np.linalg.eigh(self.cnt)
@@ -453,7 +463,7 @@ class Connectivity:
         # Compute frequencies for the ring model (if data is provided)
         if data is not None and profile in ('mex-hat', 'fs'):
             self.freqs = self.frequencies(self.eigenmodes, data)
-            self.log.debug(np.array(self.freqs) / data.faketau)
+            self.log.debug("Frequencies of vibration (theoretical): %s" % str(np.array(self.freqs) / data.faketau))
         elif profile in 'pecora1':
             self.freqs = self.frequencies(fsmodes, data, ntype='pecora', n=length, alpha=data.j0)
             self.log.debug(self.freqs)
@@ -520,7 +530,7 @@ class Connectivity:
         if r0 is None:  # We have to compute the firing rate at the stationary state
             if ntype == 'pecora':
                 r0 = Connectivity.rtheory(0, eta, delta)[0]
-                logging.info("r0: %f" % r0)
+                logging.debug("r0: %f" % r0)
             else:
                 r0 = Connectivity.rtheory(modes[0], eta, delta)
         r0u = r0 / tau
@@ -609,6 +619,7 @@ class Connectivity:
     @staticmethod
     def rtheory(j0, eta0, delta):
         r0 = 1.0
+        logging.debug("Computing theoretical firing rate values using 'fsolve' instance.")
         func = lambda tau: (np.pi ** 2 * tau ** 4 - j0 * tau ** 3 - eta0 * tau ** 2 - delta ** 2 / (4 * np.pi ** 2))
         sol = fsolve(func, r0)
         return sol
@@ -637,7 +648,7 @@ class Connectivity:
         else:
             a0 = (max - min) * np.random.rand(d_n) + min
             # noinspection PyUnresolvedReferences
-            logging.info('The overall input is: %f' % np.add.reduce(a0))
+            logging.debug('The overall input is: %f' % np.add.reduce(a0))
 
         a0 = np.concatenate((a0, np.zeros(n - d_n)))  # We complete using zeros
         np.random.shuffle(a0)  # Shuffle the vector
@@ -676,7 +687,7 @@ class Connectivity:
             aij[i] = np.roll(aij[0], i)
         # Compute eigenmodes and eigenvalues
         r0 = self.rtheory(0.0, eta, delta)[0]
-        logging.info("Firing rate at the fix point (r*): %f" % (r0 / tau))
+        logging.debug("Firing rate at the fix point (r*): %f" % (r0 / tau))
         # r02 = 1.0 / np.sqrt(np.pi**2*2.0) * np.sqrt(eta + np.sqrt(eta**2 + 1.0))
         v0 = -1.0 / (2 * np.pi * r0)
         J = np.array([[2 * v0, 2 * r0], [-2.0 * np.pi ** 2 * r0, 2 * v0]])
@@ -688,7 +699,7 @@ class Connectivity:
             gammak = -4.0 * (np.sin(np.pi * k / n)) ** 2
             A = J + E * gammak
             eigen = np.linalg.eig(A)
-            # log.info(
+            # loggging.debug(
             #     "For %d mode:\n\t Real part of Eingenvalue 0: %f\tEigenvector 0: %s\n\t "
             #     "Real part of Eingenvalue 1: %f\tEigenvector 1: %s" % (
             #         k, np.imag(eigen[0][0]) / (2.0 * np.pi * tau), str(eigen[1][0]),
@@ -697,7 +708,7 @@ class Connectivity:
             for lmbd, vect in zip(eigen[0], eigen[1]):
                 if not np.isreal(vect[0]):
                     eigenvalues.append(lmbd)
-                    # logger.info("Decay and Frequency of the %d mode: %f, %f" % (
+                    # logging.debug("Decay and Frequency of the %d mode: %f, %f" % (
                     #     k, (np.real(lmbd) * tau), (np.imag(lmbd) / (2.0 * np.pi) / tau)))
             j = np.exp(2.0 * np.pi * 1.0j * np.arange(0, n) * k / n)
             # noinspection PyUnresolvedReferences

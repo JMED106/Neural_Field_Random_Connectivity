@@ -7,9 +7,14 @@
 Perturbation:
   -m --mode:
     description: "Spatial mode of the perturbation."
-    default:     !!int 1
+    default:     [1]
     name:        "<mode>"
     choices:     ~
+  -sP --spatialProfile:
+    description: "Spatial profile of the perturbation."
+    default:     'fourier'
+    name:        "<spatial-profile>"
+    choices:     ['fourier', 'gauss']   
   -a --amplitude:
     description: "Amplitude of the perturbation."
     default:     10.0

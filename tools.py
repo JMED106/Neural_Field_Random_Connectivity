@@ -93,7 +93,7 @@ def find_nearest(array, value, ret='id'):
 
 class Perturbation:
     """ Tool to handle perturbations: time, duration, shape (attack, decay, sustain, release (ADSR), etc. """
-    def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', modes=None, amplitude=1.0, attack='exponential',
+    def __init__(self, data=None, t0=2.5, dt=0.5, ptype='pulse', stype='fourier', modes=None, amplitude=1.0, attack='exponential',
                  release='instantaneous', cntmodes=None, duration=None):
         self.logger = logging.getLogger('tools.Perturbation')
         if data is None:
@@ -103,6 +103,7 @@ class Perturbation:
 
         if modes is None:  # Default mode perturbation is first mode
             modes = [1]
+        self.logger.debug("Modes of perturbation: %s" % str(modes))
 
         # Input at t0
         self.input = np.ones(self.d.l) * 0.0
@@ -118,6 +119,7 @@ class Perturbation:
         self.tf = t0 + dt
         self.t = 0
         self.duration = duration
+        self.period = 00.0
         # Rise variables (attack) and parameters
         self.attack = attack
         self.taur = 0.2
@@ -131,6 +133,7 @@ class Perturbation:
 
         # Amplitude parameters
         self.ptype = ptype
+        self.spatialtype = stype
         self.amp = amplitude
         # Spatial modulation (wavelengths)
         self.phi = np.linspace(-np.pi, np.pi, self.d.l)
@@ -151,16 +154,26 @@ class Perturbation:
         """ Gives the spatial profile of the perturbation: different wavelength and combinations
             of them can be produced.
         """
-        sprofile = 0.0
-        if np.isscalar(modes):
-            self.logger.warning("'Modes' should be an iterable.")
-            modes = [modes]
-        for m in modes:
-            if cntmodes is None:
-                sprofile += amp * np.cos(m * self.phi)
-            else:
-                sprofile += amp * cntmodes[m]
-        return sprofile
+        self.logger.debug("Spatial profile of the perturbation: '%s'" % self.spatialtype)
+        if self.spatialtype == 'gauss':
+            return amp*Connectivity.vonmises(1.0, 8.0, 0.0, 1.0, self.d.l, np.linspace(-pi ,pi, self.d.l))
+        elif self.spatialtype == 'fourier':
+            sprofile = 0.0
+            phi = 0.0
+            if np.isscalar(modes):
+                self.logger.warning("'Modes' should be an iterable.")
+                modes = [modes]
+            for m in modes:
+                if cntmodes is None:
+                    self.logger.debug("Perturbation of mode %d with phase %f" % (m, phi))
+                    sprofile += amp * np.cos(m * self.phi + phi)
+                    phi = np.random.randn(1) * np.pi
+                else:
+                    sprofile += amp * cntmodes[m]
+            return sprofile
+        else:
+            self.logger.error("Spatial profile '%s' not implemented." % self.spatialtype)
+            return 0.0
 
     def timeevo(self, temps, freq=1.0):
         """ Time evolution of the perturbation """
@@ -173,7 +186,11 @@ class Perturbation:
                     self.input = self.tdmod * self.smod
                 elif self.release == 'instantaneous':
                     self.input = 0.0
+                    self.tdmod = 1.0
+                    self.trmod = 0.01
                     self.pbool = False
+                    self.t0 += self.period
+                    self.tf += self.period
             else:  # During the pulse (from t0 until tf)
                 if self.attack == 'exponential' and self.trmod < 1.0:
                     self.trmod += (self.d.dt / self.taur) * self.trmod
@@ -375,24 +392,44 @@ class FrequencySpectrum:
         pass
 
     @staticmethod
-    def analyze(tdata, t0, t1, tau):
+    def analyze(tdata, t0, t1, tau, method='normal'):
         """ This function takes all the time series and performs fft on it."""
         # Data
         num_points = len(tdata)
+        logging.info('Analyzing frequency spectrum using Fourier Transform.')
 
-        t = np.linspace(t0, t1, num_points)
+        # t = np.linspace(t0, t1, num_points)
         dt = (t1 - t0) / (1.0 * num_points)
-
+        tf = []
+        yf = []
+        methods = []
         # FFT data
-        tf = np.linspace(0, 1.0 / (2.0 * dt), num_points / 2)
-        yf = 2.0 / num_points * np.abs(fft(tdata)[0:num_points / 2])
-        # 70 va bastante bien
-        yf2 = welch(tdata, fs=1.0 / (tau * dt), nperseg=1024 * 70)
-        # plt.plot(tf[10:] / tau, yf[10:])
-        # plt.xlim([0, 100])
-        # plt.show()
-        plt.plot(yf2[0], yf2[1])
+        if method in ('normal', 'all'):
+            methods.append('fft')
+            logging.debug('Computing Fourier Transform using fft method')
+            tf.append(np.linspace(0, 1.0 / (2.0 * dt * tau), num_points / 2))
+            yf.append(2.0 / num_points * np.abs(fft(tdata)[0:num_points / 2]))
+        if method in ('welch', 'all'):
+            methods.append('welch %s' % 'nperseg=1024 * 70')
+            logging.debug('Computing Fourier Transform using welch method')
+            # 70 va bastante bien
+            yf2 = welch(tdata, fs=1.0 / (tau * dt), nperseg=1024 * 70)
+            tf.append(yf2[0])
+            yf.append(yf2[1])
+        else:
+            logging.error('Analysis method not implemented.')
+            return -1
+
+        # Normalize measure to be plotted together
+        maxx = []
+        for y, t, m in zip(yf, tf, methods):
+            mask = (t > 5.0)
+            mean = np.mean(y)
+            maxx.append(np.max(y[mask] / mean))
+            plt.plot(t, y/mean, label=m)
         plt.xlim([0, 100])
+        plt.ylim([0, np.max(np.array(maxx)*1.1)])
+        plt.legend()
         plt.show()
         # exit(-1)
         # index_peaks = np.array(argrelextrema(yf, np.greater))
