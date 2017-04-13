@@ -37,7 +37,6 @@ class Data:
     """ Object designed to store data,
         and perform modifications of this data in case it is necessary.
     """
-
     def __init__(self, l=100, n=1E5, eta0=0, j0=0.0, delta=1.0, t0=0.0, tfinal=50.0,
                  dt=1E-3, delay=0.0, tau=1.0, faketau=20.0E-3, fp='lorentz', system='nf'):
 
@@ -205,8 +204,7 @@ class Data:
         # 0.9) Perturbation parameters
         self.PERT = False
         self.Input = 0.0
-        self.It = np.zeros(self.nsteps)
-        self.It[0] = self.Input * 1.0
+        self.it = np.zeros((self.nsteps, self.l))
         # input duration
         self.deltat = dt * 50
         self.inputtime = 10.0
@@ -364,7 +362,6 @@ class Data:
             self.t['nf'] = self.tpoints
             self.k['nf'] = None
             self.dr['nf'] = th.thdist
-
     @staticmethod
     def find_nearest(array, value):
         """ Extract the argument of the closest value from array """
@@ -419,17 +416,27 @@ class Connectivity:
             if fsmodes is None:
                 fsmodes = 10.0 * np.array([0, 1, 0.75, -0.25])  # Default values
                 self.log.debug("Creating default connectivity %s" % str(fsmodes))
-                fsmodes_ex = 10.0 * np.array([0.75 * 2.0, 1, 0.75, -0.25])  # Default values
-                fsmodes_in = 10.0 * np.array([-0.75 * 2.0, 0.0, 0.0, 0.0])  # Default values
+                fsmodes_ex = 10.0 * np.array([2.3, 1, 0.75, -0.25])  # Default values
+                fsmodes_in = 10.0 * np.array([-2.3, 0.0, 0.0, 0.0])  # Default values
             else:
                 self.log.debug("Creating custom connectivity %s" % str(fsmodes))
+                self.log.debug("Automatically separating connectivity into excitatory and inhibitory connectivies.")
+                # Create a dummy connectivity to see the minimum value:
+                minvalue = np.min(self.jcntvty(fsmodes, coords=ij)[0])
+                self.log.debug('Minumum value of the connectivity: %f' % minvalue)
+                minvalue = np.floor(minvalue)
+                self.log.debug('Projected mode 0 value: %f' % (-1.0*minvalue))
                 fsmodes_ex = list(fsmodes)
                 fsmodes_in = [0.0, 0.0]
-                maxmode = np.max(fsmodes)
+                if minvalue < 0:
+                    newmode0 = -1.0 * minvalue
+                else:
+                    newmode0 = fsmodes[0]
                 mode0 = fsmodes[0]
-                if mode0 < maxmode * 2.0:
-                    fsmodes_ex[0] = maxmode * 2.0
-                    fsmodes_in[0] = fsmodes[0] - maxmode * 2.0
+                if mode0 < newmode0:
+                    fsmodes_ex[0] = newmode0
+                    fsmodes_in[0] = minvalue
+                    self.log.debug('Mode 0 set to %f' % fsmodes_ex[0])
             self.log.debug("Excitatory modes: %s" % str(fsmodes_ex))
             self.log.debug("Inhibitory modes: %s" % str(fsmodes_in))
             self.cnt_ex = self.jcntvty(fsmodes_ex, coords=ij)
@@ -704,7 +711,7 @@ class Connectivity:
             #     "Real part of Eingenvalue 1: %f\tEigenvector 1: %s" % (
             #         k, np.imag(eigen[0][0]) / (2.0 * np.pi * tau), str(eigen[1][0]),
             #         np.imag(eigen[0][1]) / (2.0 * np.pi * tau), str(eigen[1][1])))
-            raw_input("Press ENTER to continue...")
+            # raw_input("Press ENTER to continue...")
             for lmbd, vect in zip(eigen[0], eigen[1]):
                 if not np.isreal(vect[0]):
                     eigenvalues.append(lmbd)

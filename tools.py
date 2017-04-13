@@ -5,7 +5,7 @@ import logging
 import numba
 import numpy as np
 from scipy.fftpack import fft
-from scipy.signal import argrelextrema, welch, butter, lfilter
+from scipy.signal import argrelextrema, welch, butter, lfilter, chirp, hilbert
 import matplotlib.pyplot as plt
 
 from nflib import Data, Connectivity
@@ -119,7 +119,7 @@ class Perturbation:
         self.tf = t0 + dt
         self.t = 0
         self.duration = duration
-        self.period = 00.0
+        self.period = 0.0
         # Rise variables (attack) and parameters
         self.attack = attack
         self.taur = 0.2
@@ -130,12 +130,16 @@ class Perturbation:
         self.taud = 0.2
         self.tdmod = 1.0
         self.mintd = 0.0
+        # Oscillatory forcing:
+        self.chirp = chirp(data.tpoints*data.faketau, 0.0, data.tpoints[-1]*data.faketau, 60.0, phi=-90)
+        self.freq = []
 
         # Amplitude parameters
         self.ptype = ptype
         self.spatialtype = stype
         self.amp = amplitude
         # Spatial modulation (wavelengths)
+        self.random = False
         self.phi = np.linspace(-np.pi, np.pi, self.d.l)
         self.smod = self.sptprofile(modes, self.amp, cntmodes=cntmodes)
 
@@ -165,9 +169,12 @@ class Perturbation:
                 modes = [modes]
             for m in modes:
                 if cntmodes is None:
+                    if self.random:
+                        phi = np.random.randn(1) * np.pi
+                    else:
+                        phi = 0.0
                     self.logger.debug("Perturbation of mode %d with phase %f" % (m, phi))
                     sprofile += amp * np.cos(m * self.phi + phi)
-                    phi = np.random.randn(1) * np.pi
                 else:
                     sprofile += amp * cntmodes[m]
             return sprofile
@@ -200,11 +207,16 @@ class Perturbation:
                     if temps >= self.t0:
                         self.input = 1.0 * self.smod
         elif self.ptype == 'oscillatory':
+            self.freq.append(freq)
             if temps >= self.t0 + self.dt:
                 self.trmod = self.amp * np.sin(self.t * 1.0 * freq * 2.0 * np.pi)
                 self.t += self.d.dt
             if temps >= self.t0 + self.dt + self.duration:
                 self.trmod = 0.0
+            self.input = self.trmod * self.smod
+        elif self.ptype == 'chirp':
+            tstep = int(temps/self.d.dt)
+            self.trmod = self.amp * self.chirp[tstep]
             self.input = self.trmod * self.smod
 
 
@@ -222,7 +234,7 @@ class SaveResults:
         else:
             self.cnt = cnt
         if pert is None:
-            self.p = Perturbation()
+            self.p = Perturbation(data=data, ptype='none')
         else:
             self.p = pert
 
@@ -241,7 +253,9 @@ class SaveResults:
                                         'cnt': cnt.cnt_ex + cnt.cnt_in,
                                         'eigenmodes': cnt.eigenmodes,
                                         'eigenvectors': cnt.eigenvectors, 'freqs': cnt.freqs}
-        self.results['perturbation'] = {'t0': pert.t0}
+        self.results['perturbation'] = {}
+        for i, pert in enumerate(self.p):
+            self.results['perturbation']["%s_%d" % (pert.ptype, i)] = {'t0': pert.t0}
         if cnt.profile == 'mex-hat':
             self.results['connectivity']['je'] = cnt.je
             self.results['connectivity']['ji'] = cnt.ji
@@ -500,6 +514,55 @@ class FrequencySpectrum:
         b, a = self.butter_highpass(cutoff, fs, order=order)
         y = lfilter(b, a, data)
         return y
+
+
+class LinearStability:
+    """ Class containing methods for analyzing the linear stability analysis.
+           + Forcing..
+           + Envelopes ... .
+    """
+
+    def __init__(self):
+        """ Things ..."""
+        pass
+
+    @staticmethod
+    def envelope_amplitude(signal, tau=None):
+        """ Method to compute the enveloping amplitude of a signal."""
+        if tau is None:
+            tau = 20E-3
+        samples = np.size(signal)
+        duration = samples * tau
+        fs = samples / duration
+        analytic_signal = hilbert(signal)
+        amplitude_envelope = np.abs(analytic_signal)
+        instantaneous_phase = np.unwrap(np.angle(analytic_signal))
+        instantaneous_frequency = np.diff(instantaneous_phase) / (2.0*np.pi) * fs
+        return {'envelope': amplitude_envelope, 'phase': instantaneous_phase, 'freq': instantaneous_frequency}
+
+    @staticmethod
+    def envelope2extreme(signal, t, tau=None, pop=None):
+        if tau is None:
+            tau = 20E-3
+        # Filter the signal to a baseline
+        l = np.size(signal[0])
+        if pop is None:
+            pop = l/2
+        logging.debug("Shape of 'signal': %s" % str(np.shape(signal)))
+        xdata_mean = signal.mean(axis=1)
+        x_filter = signal - np.dot(xdata_mean.reshape((len(xdata_mean), 1)), np.ones((1, l)))
+        logging.debug("Shape of 'x_filter': %s" % str(np.shape(x_filter)))
+        signalpop = x_filter[:, pop]
+        logging.debug("Shape of 'signalpop': %s" % str(np.shape(signalpop)))
+
+        extreme_max = argrelextrema(signalpop, np.greater)[0]
+        extreme_min = argrelextrema(signalpop, np.less)[0]
+        logging.debug("Shapes of 'extremes': %s, %s" % (str(np.shape(extreme_max)), str(np.shape(extreme_min))))
+        extreme = np.sort(np.ravel(np.concatenate((extreme_max, extreme_min))))
+        logging.debug("Shape of 'extreme': %s" % str(np.shape(extreme)))
+        time = t[extreme]*tau
+        amplitude = np.abs(signalpop[extreme])
+        return {'envelope': amplitude, 't': time, 'args': extreme}
 
 
 class DictToObj(object):

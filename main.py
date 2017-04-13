@@ -10,13 +10,14 @@ from timeit import default_timer as timer
 import progressbar as pb
 import numpy as np
 from nflib import Data, FiringRate, Connectivity
-from tools import qifint, TheoreticalComputations, SaveResults, Perturbation, noise, FrequencySpectrum, ColorPlot
+from tools import qifint, TheoreticalComputations, SaveResults, Perturbation, noise, FrequencySpectrum, ColorPlot, \
+    LinearStability
 
-import Gnuplot
+#import Gnuplot
 
 # Use this option to turn off fifo if you get warnings like:
 # line 0: warning: Skipping unreadable file "/tmp/tmpakexra.gnuplot/fifo"
-Gnuplot.GnuplotOpts.prefer_fifo_data = 0
+#Gnuplot.GnuplotOpts.prefer_fifo_data = 0
 
 __author__ = 'jm'
 
@@ -35,7 +36,7 @@ pi2 = np.pi * np.pi
 # We first try to parse optional configuration files:
 fparser = argparse.ArgumentParser(add_help=False)
 fparser.add_argument('-f', '--file', default="conf.txt", dest='-f', metavar='<file>')
-fparser.add_argument('-db', '--debug', default="INFO", dest='db', metavar='<debug>',
+fparser.add_argument('-db', '--debug', default="DEBUG", dest='db', metavar='<debug>',
                      choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
 farg = fparser.parse_known_args()
 conffile = vars(farg[0])['-f']
@@ -85,8 +86,9 @@ for group in options:
             gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
                             action='store_true')
         elif isinstance(args[key]['default'], list):
+            tipado = type(args[key]['default'][0])
             gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
-                            metavar=args[key]['name'], type=int,
+                            metavar=args[key]['name'], type=tipado,
                             choices=args[key]['choices'], nargs='+')
         else:
             gr.add_argument(*flags, default=args[key]['default'], help=args[key]['description'], dest=flags[0][1:],
@@ -123,10 +125,13 @@ if d.system != 'nf' and not d.new_ic:
 # mode patch
 if args.m == -1:
     args.m = range(0, 10)
-p = Perturbation(data=d, dt=args.pt, modes=args.m, amplitude=float(args.a), attack=args.A, cntmodes=c.eigenvectors,
-                 t0=args.pt0, stype=args.sP)
+p = list()
+p.append(Perturbation(data=d, dt=args.pt, modes=args.m, amplitude=float(args.a), attack=args.A, cntmodes=c.eigenvectors,
+                      t0=args.pt0, stype=args.sP, ptype=args.pT, duration=d.total_time))
 if args.pV:
-    p.amp = 0.0
+    p[0].amp = 0.0
+# p.append(Perturbation(data=d, dt=args.pt, modes=[1], amplitude=float(args.a), attack=args.A, cntmodes=c.eigenvectors,
+#                       t0=2.5, stype=args.sP, ptype=args.pT, duration=d.total_time))
 
 # 0.6) Define saving paths:
 sr = SaveResults(data=d, cnt=c, pert=p, system=d.system, parameters=opts)
@@ -149,7 +154,7 @@ temps = 0
 nois = 0.0
 noise_E = noise_I = 0.0
 kp = k = 0
-
+freq = 0.0
 # Time loop
 while temps < d.tfinal:
     # Time step variables
@@ -158,19 +163,25 @@ while temps < d.tfinal:
     k2p = tstep % 2
     k2 = (tstep + 2 - 1) % 2
     # ######################## - PERTURBATION  - ##
-    if p.pbool and not d.new_ic:
-        if temps >= p.t0:
-            p.timeevo(temps)
-            pt0step = tstep * 1
+    # Perturbation at certain time
+    for pert in p:
+        if pert.t0step == tstep:
+            pert.pbool = True
+        if pert.pbool and not d.new_ic:
+            if temps >= pert.t0:
+                pert.timeevo(temps, freq=freq)
+                pt0step = tstep * 1
+        d.it[kp, :] += pert.input
     # Noisy perturbation
     if args.ns and not d.new_ic:
         if tstep % 1 == 0:
-            nois = np.sqrt(2.0 * d.dt / d.tau * args.nD) * np.random.randn(d.l / 10)
-            nois = np.dot(p.auxMat, nois)
+            # nois = np.sqrt(2.0 * d.dt / d.tau * args.nD) * np.random.randn(d.l / 10)
+            # nois = np.dot(p.auxMat, nois)
+            nois = np.sqrt(2.0 * d.dt / d.tau * args.nD) * np.random.rand(d.l)
         else:
             nois = 0.0
 
-    p.it[kp, :] = p.input + d.tau / d.dt * nois
+    d.it[kp, :] += d.tau / d.dt * nois
 
     # ######################## -  INTEGRATION  - ##
     # ######################## -      qif      - ##
@@ -184,9 +195,10 @@ while temps < d.tfinal:
         s = se + si
 
         # Another perturbation (directly changing mean potentials)
-        if tstep == p.t0step and args.pV and not d.new_ic:
-            d.matrixE[:, 0] += np.dot(p.auxMatD, args.pD * p.smod)
-            d.matrixI[:, 0] += args.sym * np.dot(p.auxMatD, args.pD * p.smod)
+        for pert in p:
+            if tstep == pert.t0step and args.pV and not d.new_ic:
+                d.matrixE[:, 0] += np.dot(pert.auxMatD, args.pD * pert.smod)
+                d.matrixI[:, 0] += args.sym * np.dot(pert.auxMatD, args.pD * pert.smod)
 
         if d.fp == 'noise':
             noise_E = np.sqrt(2.0 * d.dt / d.tau * d.delta) * noise(d.Ne)
@@ -194,11 +206,11 @@ while temps < d.tfinal:
 
         # Excitatory
         d.matrixE = qifint(d.matrixE, d.matrixE[:, 0], d.matrixE[:, 1], d.etaE + d.tau / d.dt * noise_E,
-                           s + p.input,
+                           s + d.it[kp, :],
                            temps, d.Ne, d.dNe, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
         # Inhibitory
         d.matrixI = qifint(d.matrixI, d.matrixI[:, 0], d.matrixI[:, 1], d.etaI + d.tau / d.dt * noise_I,
-                           s + args.sym * p.input,
+                           s + args.sym * d.it[kp, :],
                            temps, d.Ni, d.dNi, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
 
         # Prepare spike matrices for Mean-Field computation and firing rate measure
@@ -236,22 +248,19 @@ while temps < d.tfinal:
     # ######################## --   FR EQS.   -- ##
     if d.system == 'nf' or d.system == 'both':
         # Another perturbation (directly changing mean potentials)
-        if tstep == p.t0step and args.pV and not d.new_ic:
-            d.v_ex[k] += args.pD * p.smod
-            d.v_in[k] += args.sym * args.pD * p.smod
+        for pert in p:
+            if tstep == pert.t0step and args.pV and not d.new_ic:
+                d.v_ex[k] += args.pD * pert.smod
+                d.v_in[k] += args.sym * args.pD * pert.smod
 
         # We compute the Mean-field vector S ( 1.0/(2.0*pi)*dx = 1.0/l )
         d.sphi[k2p] = (1.0 / d.l * np.dot(c.cnt_ex, d.r_ex[k]) + 1.0 / d.l * np.dot(c.cnt_in, d.r_in[k]))
         # -- Integration -- #
         d.r_ex[kp] = d.r_ex[k] + d.dt * (d.delta / pi + 2.0 * d.r_ex[k] * d.v_ex[k])
-        d.v_ex[kp] = d.v_ex[k] + d.dt * (d.v_ex[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_ex[k] ** 2 + p.it[kp])
+        d.v_ex[kp] = d.v_ex[k] + d.dt * (d.v_ex[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_ex[k] ** 2 + d.it[kp])
         d.r_in[kp] = d.r_in[k] + d.dt * (d.delta / pi + 2.0 * d.r_in[k] * d.v_in[k])
         d.v_in[kp] = d.v_in[k] + d.dt * (
-            d.v_in[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_in[k] ** 2 + args.sym * p.it[kp])
-
-    # Perturbation at certain time
-    if int(p.t0 / d.dt) == tstep:
-        p.pbool = True
+            d.v_in[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_in[k] ** 2 + args.sym * d.it[kp])
 
     # Compute the frequency by hand (for a given node, typically at the center)
 
@@ -276,36 +285,19 @@ temps -= d.dt
 # th.thdist = th.theor_distrb(d.sphi[kp])
 
 # Frequency analysis
+envelope = {}
 if args.Frq:
     plot = ColorPlot(data=d)
     phi = d.l / 2
     F.analyze(d.r_ex[:, phi] - d.r0, 0.0, d.tfinal, d.faketau, method='all')
     F.analyze(plot.filter(d.r_ex - d.r0)[:, phi], 0.0, d.tfinal, d.faketau, method='all')
-    #
-    # freqs = None
-    # yf = 0
-    # freqs2 = 0
-    # yf2 = 0
-    #
-    # for phi in xrange(d.l):
-    #     f, y =  F.analyze(d.r_ex[:, phi] - d.r0, 0.0, d.tfinal, d.faketau)
-    #     yf += y
-    #     f, y = F.analyze(plot.filter(d.r_ex - d.r0)[:, phi], 0.0, d.tfinal, d.faketau)
-    #     yf2 += y
-    #
-    #
-    #     # freqs2, yf2 = (freqs2, yf2)  + F.analyze(plot.filter(d.r_ex - d.r0)[:, phi], 0.0, d.tfinal, d.faketau)
-    # yf /= d.l
-    # yf2 /= d.l
-    # freqs = f*1.0
-    # import matplotlib.pyplot as plt
-    # plt.plot(freqs, yf)
-    # plt.xlim([0, 100])
-    # plt.show()
-    # plt.plot(freqs, yf2)
-    # plt.xlim([0, 100])
-    # plt.show()
-# y = F.butter_bandpass_filter(d.r_ex[:, d.l/2]/d.faketau - d.r0/d.faketau, 20.0, 100.0, 1.0/ (d.dt*d.faketau), order=3)
+    for pert in p:
+        if pert.ptype == 'oscillatory' or pert.ptype == 'chirp':
+            pop = d.l / 2
+            if 'qif' in d.systems:
+                envelope['qif'] = LinearStability.envelope2extreme(fr.r, fr.tempsfr, tau=d.faketau)
+            if 'nf' in d.systems:
+                envelope['nf'] = LinearStability.envelope2extreme((d.r_ex + d.r_in) / 2.0, d.tpoints, tau=d.faketau)
 
 # Save initial conditions
 if d.new_ic:
@@ -328,14 +320,23 @@ if not args.nos:
     else:
         d.register_ts(th=th)
 
-    # Save results
     sr.create_dict()
-    sr.results['perturbation']['It'] = p.it
+    sr.results['perturbation']['It'] = d.it
+    for pert in p:
+        if pert.ptype == 'oscillatory':
+            sr.results['perturbation']['freqs'] = pert.freq
+            if args.Frq and pert.ptype in ['']:
+                for sys in d.systems:
+                    sr.results[sys]['fr']['envelope'] = envelope[sys]
+        if pert.ptype == 'chirp':
+            sr.results['perturbation']['chirp'] = pert.chirp
+            for sys in d.systems:
+                sr.results[sys]['fr']['envelope'] = envelope[sys]
     sr.save()
 
 # Save just some data and plot
 if args.pl:
-    plot = ColorPlot(data=d)
+    plot = ColorPlot(data=d, tfinal=70)
     plot.cplot(d.r_ex)
     plot.cplot(plot.filter(d.r_ex))
 
@@ -357,7 +358,7 @@ if args.gpl:
             np.c_[np.array(fr.tempsfr) * d.faketau, np.array(fr.r)[::points, d.l / 2] / d.faketau],
             with_='lines')
     else:
-        p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, p.it[::points, d.l / 2] + d.r0 / d.faketau],
+        p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.it[::points, d.l / 2] + d.r0 / d.faketau],
                                     with_='lines')
     # gp.plot(p1_ex, p1_in, p1_exin)
     gp.plot(p1_ex, p2)

@@ -55,12 +55,17 @@ Perturbation:
     default:     0.1
     name:        "<pert-disp>"
     choices:     ~
+  -pT --pertType:
+    description: "Perturbation type."
+    default:     'pulse'
+    name:        "<pert-type>"
+    choices:     ['pulse', 'oscillatory', 'chirp']
 Noise:
   -ns --noise:
     description: "Spatial noise boolean."
-    default:     false
+    default:     False
     name:        "<noise>"
-    choices:     [true, false]
+    choices:     [True, False]
   -nD --noisediffusion:
     description: "Spatial noise diffusion parameter."
     default:     1.0
@@ -105,7 +110,7 @@ Network:
     choices:     ~
   -jk --modes:
     description: "Modes of connectivity."
-    default:     [0, 10, 7.5, -2.5]
+    default:     [0.0, 10.0, 7.5, -2.5]
     name:        "<[jk]>"
     choices:     ~
   -N --popsize:
@@ -141,14 +146,14 @@ Simulation:
     choices:     ~
   -ic --initconds:
     description: "Override initial conditions generator."
-    default:     false
+    default:     False
     name:        "<initconds>"
-    choices:     [false ,true]
+    choices:     [False ,True]
   -oic --overrideic:
     description: "Override initial conditions generator."
-    default:     false
+    default:     False
     name:        "<overinitconds>"
-    choices:     [true, false]
+    choices:     [True, False]
   -s --system:
     description: "Systems to be simulated."
     default:     'nf'
@@ -176,7 +181,7 @@ Simulation:
     choices:     ~
   -db --debug:
     description: "Debugging level. Default is INFO."
-    default:     INFO
+    default:     DEBUG
     name:        "<debug>"
     choices:     [DEBUG, INFO, ERROR, WARNING, CRITICAL]
   -pl --plot:
