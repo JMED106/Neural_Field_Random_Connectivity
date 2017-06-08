@@ -42,7 +42,7 @@ def loadata(file, data):
     d = np.load(file)
     return DictToObj(d.item())
 
-def cplot(tdata, xdata, num=None, fig=None, tfinal=12, **kwargs):
+def cplot(tdata, xdata, num=None, fig=None, tinitial=0.5, tfinal=12, **kwargs):
     if num is None:
         f = []
         ax = []
@@ -67,7 +67,7 @@ def cplot(tdata, xdata, num=None, fig=None, tfinal=12, **kwargs):
                 c[i] = plt.colorbar(p[i])
             ax[i].set_ylim([-pi, pi])
             if tfinal is not None:
-                ax[i].set_xlim([0.01, 12*data.parameters.tau])
+                ax[i].set_xlim([tinitial*data.parameters.tau, tfinal*data.parameters.tau])
     else:
         f = plt.figure(num)
         ax = f.add_subplot(111)

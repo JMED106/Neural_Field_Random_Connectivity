@@ -249,8 +249,8 @@ class SaveResults:
         # Parameters are store copying the configuration dictionary and other useful parameters (from the beginning)
         self.results['parameters'] = {'l': self.d.l, 'eta0': self.d.eta0, 'delta': self.d.delta, 'j0': self.d.j0,
                                       'tau': self.d.faketau, 'args': parameters}
-        self.results['connectivity'] = {'type': cnt.profile, 'cnt_ex': cnt.cnt_ex, 'cnt_in': cnt.cnt_in,
-                                        'cnt': cnt.cnt_ex + cnt.cnt_in,
+        self.results['connectivity'] = {'type': cnt.profile,
+                                        'cnt': cnt.cnt,
                                         'eigenmodes': cnt.eigenmodes,
                                         'eigenvectors': cnt.eigenvectors, 'freqs': cnt.freqs}
         self.results['perturbation'] = {}
@@ -264,7 +264,7 @@ class SaveResults:
 
         if system == 'qif' or system == 'both':
             self.results['qif'] = dict(fr=dict(), v=dict())
-            self.results['parameters']['qif'] = {'N': self.d.N, 'Ne': self.d.Ne, 'Ni': self.d.Ni}
+            self.results['parameters']['qif'] = {'N': self.d.N}
         if system == 'nf' or system == 'both':
             self.results['nf'] = dict(fr=dict(), v=dict())
 
@@ -631,3 +631,25 @@ class ColorPlot:
         x_mean_phi = xdata.mean(axis=1)
         x_filter = xdata - np.dot(x_mean_phi.reshape((t,1)), np.ones((1,l)))
         return x_filter
+
+
+class Raster():
+    def __init__(self, data=None, dt=100):
+        self.logger = logging.getLogger('tools.Raster')
+        if data is None:
+            self.d = Data()
+        else:
+            self.d = data
+
+        # Variables
+        # create plot
+        pass
+
+    def getdata(self):
+        pass
+
+    def update(self):
+        pass
+
+    def save(self):
+        pass

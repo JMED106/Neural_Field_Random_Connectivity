@@ -13,11 +13,11 @@ from nflib import Data, FiringRate, Connectivity
 from tools import qifint, TheoreticalComputations, SaveResults, Perturbation, noise, FrequencySpectrum, ColorPlot, \
     LinearStability
 
-#import Gnuplot
+import Gnuplot
 
 # Use this option to turn off fifo if you get warnings like:
 # line 0: warning: Skipping unreadable file "/tmp/tmpakexra.gnuplot/fifo"
-#Gnuplot.GnuplotOpts.prefer_fifo_data = 0
+Gnuplot.GnuplotOpts.prefer_fifo_data = 0
 
 __author__ = 'jm'
 
@@ -109,7 +109,7 @@ c = Connectivity(d.l, profile=args.c, fsmodes=args.jk, amplitude=10.0, data=d, d
 
 # 0.3) Load initial conditions
 if args.oic is False:
-    d.load_ic(0.0, system=d.system)
+    d.load_ic(0.0, system=d.system, ext=args.ext)
 else:
     # Override initial conditions generator:
     pass
@@ -147,12 +147,18 @@ widgets = ['Progress: ', pb.Percentage(), ' ',
 ###################################################################################
 # 1) Simulation (Integrate the system)
 print('Simulating ...')
+if args.rast:
+    raster = file('/home/jm/raster0.dat', 'w')
+    raster.close()
+    raster = file('/home/jm/raster0.dat', 'a')
+else:
+    raster = None
 pbar = pb.ProgressBar(widgets=widgets, maxval=10 * (d.nsteps + 1)).start()
 time1 = timer()
 tstep = 0
 temps = 0
 nois = 0.0
-noise_E = noise_I = 0.0
+noise_v = 0.0
 kp = k = 0
 freq = 0.0
 # Time loop
@@ -190,37 +196,34 @@ while temps < d.tfinal:
         tskp = tstep % d.spiketime
         tsk = (tstep + d.spiketime - 1) % d.spiketime
         # We compute the Mean-field vector s_j
-        se = (1.0 / d.Ne) * np.dot(c.cnt_ex, np.dot(d.auxMatE, np.dot(d.spikes_e, d.a_tau[:, tsyp])))
-        si = (1.0 / d.Ni) * np.dot(c.cnt_in, np.dot(d.auxMatI, np.dot(d.spikes_i, d.a_tau[:, tsyp])))
-        s = se + si
+        s = (1.0 / d.N) * np.dot(c.cnt_ex, np.dot(d.auxMat, np.dot(d.spikes, d.a_tau[:, tsyp])))
 
         # Another perturbation (directly changing mean potentials)
         for pert in p:
             if tstep == pert.t0step and args.pV and not d.new_ic:
-                d.matrixE[:, 0] += np.dot(pert.auxMatD, args.pD * pert.smod)
-                d.matrixI[:, 0] += args.sym * np.dot(pert.auxMatD, args.pD * pert.smod)
+                d.matrix[:, 0] += np.dot(pert.auxMatD, args.pD * pert.smod)
 
         if d.fp == 'noise':
-            noise_E = np.sqrt(2.0 * d.dt / d.tau * d.delta) * noise(d.Ne)
-            noise_I = np.sqrt(2.0 * d.dt / d.tau * d.delta) * noise(d.Ni)
+            noise_v = np.sqrt(2.0 * d.dt / d.tau * d.delta) * noise(d.N)
 
         # Excitatory
-        d.matrixE = qifint(d.matrixE, d.matrixE[:, 0], d.matrixE[:, 1], d.etaE + d.tau / d.dt * noise_E,
-                           s + d.it[kp, :],
-                           temps, d.Ne, d.dNe, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
-        # Inhibitory
-        d.matrixI = qifint(d.matrixI, d.matrixI[:, 0], d.matrixI[:, 1], d.etaI + d.tau / d.dt * noise_I,
-                           s + args.sym * d.it[kp, :],
-                           temps, d.Ni, d.dNi, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
+        d.matrix = qifint(d.matrix, d.matrix[:, 0], d.matrix[:, 1], d.eta + d.tau / d.dt * noise_v,
+                          s + d.it[kp, :],
+                          temps, d.N, d.dN, d.dt, d.tau, d.vpeak, d.refr_tau, d.tau_peak)
+
+        # Store spikes to create a raster plot:
+        if args.rast:
+            if tstep % 75 == 0:
+                spikes = (d.matrix[:, 1] > temps)
+                neurons = np.argwhere(spikes == True)
+                times = d.matrix[spikes, 1]
+                if len(times) > 0:
+                    np.savetxt(raster, np.c_[times, neurons])
 
         # Prepare spike matrices for Mean-Field computation and firing rate measure
         # Excitatory
-        d.spikes_e_mod[:, tsk] = 1 * d.matrixE[:, 2]  # We store the spikes
-        d.spikes_e[:, tsyp] = 1 * d.spikes_e_mod[:, tskp]
-        # Inhibitory
-        d.spikes_i_mod[:, tsk] = 1 * d.matrixI[:, 2]  # We store the spikes
-        d.spikes_i[:, tsyp] = 1 * d.spikes_i_mod[:, tskp]
-
+        d.spikes_mod[:, tsk] = 1 * d.matrix[:, 2]  # We store the spikes
+        d.spikes[:, tsyp] = 1 * d.spikes_mod[:, tskp]
         # If we are just obtaining the initial conditions (a steady state) we don't need to
         # compute the firing rate.
         if not d.new_ic:
@@ -230,13 +233,11 @@ while temps < d.tfinal:
             # fr.vavg += 1
 
             # ######################## -- FIRING RATE MEASURE -- ##
-            fr.frspikes_e[:, tstep % fr.wsteps] = 1 * d.spikes_e[:, tsyp]
-            fr.frspikes_i[:, tstep % fr.wsteps] = 1 * d.spikes_i[:, tsyp]
+            fr.frspikes[:, tstep % fr.wsteps] = 1 * d.spikes[:, tsyp]
             fr.firingrate(tstep)
             # Distribution of Firing Rates
             if tstep > 0:
-                fr.tspikes_e2 += d.matrixE[:, 2]
-                fr.tspikes_i2 += d.matrixI[:, 2]
+                fr.tspikes2 += d.matrix[:, 2]
                 fr.ravg2 += 1  # Counter for the "instantaneous" distribution
                 fr.ravg += 1  # Counter for the "total time average" distribution
 
@@ -250,17 +251,13 @@ while temps < d.tfinal:
         # Another perturbation (directly changing mean potentials)
         for pert in p:
             if tstep == pert.t0step and args.pV and not d.new_ic:
-                d.v_ex[k] += args.pD * pert.smod
-                d.v_in[k] += args.sym * args.pD * pert.smod
+                d.v[k] += args.pD * pert.smod
 
         # We compute the Mean-field vector S ( 1.0/(2.0*pi)*dx = 1.0/l )
-        d.sphi[k2p] = (1.0 / d.l * np.dot(c.cnt_ex, d.r_ex[k]) + 1.0 / d.l * np.dot(c.cnt_in, d.r_in[k]))
+        d.sphi[k2p] = (1.0 / d.l * np.dot(c.cnt_ex, d.r[k]) + 1.0 / d.l * np.dot(c.cnt, d.r[k]))
         # -- Integration -- #
-        d.r_ex[kp] = d.r_ex[k] + d.dt * (d.delta / pi + 2.0 * d.r_ex[k] * d.v_ex[k])
-        d.v_ex[kp] = d.v_ex[k] + d.dt * (d.v_ex[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_ex[k] ** 2 + d.it[kp])
-        d.r_in[kp] = d.r_in[k] + d.dt * (d.delta / pi + 2.0 * d.r_in[k] * d.v_in[k])
-        d.v_in[kp] = d.v_in[k] + d.dt * (
-            d.v_in[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r_in[k] ** 2 + args.sym * d.it[kp])
+        d.r[kp] = d.r[k] + d.dt * (d.delta / pi + 2.0 * d.r[k] * d.v[k])
+        d.v[kp] = d.v[k] + d.dt * (d.v[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r[k] ** 2 + d.it[kp])
 
     # Compute the frequency by hand (for a given node, typically at the center)
 
@@ -273,11 +270,12 @@ while temps < d.tfinal:
 pbar.finish()
 # Stop the timer
 print 'Total time: {}.'.format(timer() - time1)
-
+if args.rast:
+    raster.close()
 ###################################################################################
 # 2) Post-Simulation, saving, plotting, analayzing.
-logger.debug("Stationary firing rate (excitatory and inhibitory): %f, %f" % (d.r_ex[kp, 0], d.r_in[kp, 0]))
-logger.debug("Stationary mean membrane potential (excitatory and inhibitory): %f, %f" % (d.v_ex[kp, 0], d.v_in[kp, 0]))
+logger.debug("Stationary firing rate : %f" % d.r[kp, 0])
+logger.debug("Stationary mean membrane potential : %f" % d.v[kp, 0])
 
 # Compute distribution of firing rates of neurons
 tstep -= 1
@@ -289,15 +287,15 @@ envelope = {}
 if args.Frq:
     plot = ColorPlot(data=d)
     phi = d.l / 2
-    F.analyze(d.r_ex[:, phi] - d.r0, 0.0, d.tfinal, d.faketau, method='all')
-    F.analyze(plot.filter(d.r_ex - d.r0)[:, phi], 0.0, d.tfinal, d.faketau, method='all')
+    F.analyze(d.r[:, phi] - d.r0, 0.0, d.tfinal, d.faketau, method='all')
+    F.analyze(plot.filter(d.r - d.r0)[:, phi], 0.0, d.tfinal, d.faketau, method='all')
     for pert in p:
         if pert.ptype == 'oscillatory' or pert.ptype == 'chirp':
             pop = d.l / 2
             if 'qif' in d.systems:
                 envelope['qif'] = LinearStability.envelope2extreme(fr.r, fr.tempsfr, tau=d.faketau)
             if 'nf' in d.systems:
-                envelope['nf'] = LinearStability.envelope2extreme((d.r_ex + d.r_in) / 2.0, d.tpoints, tau=d.faketau)
+                envelope['nf'] = LinearStability.envelope2extreme(d.r , d.tpoints, tau=d.faketau)
 
 # Save initial conditions
 if d.new_ic:
@@ -309,9 +307,7 @@ if not args.nos:
     # Register data to a dictionary
     if 'qif' in d.systems:
         # Distribution of firing rates over all time
-        fr.frqif_e = fr.tspikes_e / (fr.ravg * d.dt) / d.faketau
-        fr.frqif_i = fr.tspikes_i / (fr.ravg * d.dt) / d.faketau
-        fr.frqif = np.concatenate((fr.frqif_e, fr.frqif_i))
+        fr.frqif = fr.tspikes / (fr.ravg * d.dt) / d.faketau
 
         if 'nf' in d.systems:
             d.register_ts(fr, th)
@@ -337,8 +333,8 @@ if not args.nos:
 # Save just some data and plot
 if args.pl:
     plot = ColorPlot(data=d, tfinal=70)
-    plot.cplot(d.r_ex)
-    plot.cplot(plot.filter(d.r_ex))
+    plot.cplot(d.r)
+    plot.cplot(plot.filter(d.r))
 
 # Preliminary plotting with gnuplot
 if args.gpl:
@@ -351,7 +347,9 @@ if args.gpl:
         points = 1
     gpllog.info("Plotting every %d points", points)
     gp = Gnuplot.Gnuplot(persist=1)
-    p1_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r_ex[::points, d.l / 2] / d.faketau],
+    p1_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r[::points, d.l / 2] / d.faketau],
+                                   with_='lines')
+    p2_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r[::points, d.l / 3] / d.faketau],
                                    with_='lines')
     if args.s != 'nf':
         p2 = Gnuplot.PlotItems.Data(
@@ -361,7 +359,7 @@ if args.gpl:
         p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.it[::points, d.l / 2] + d.r0 / d.faketau],
                                     with_='lines')
     # gp.plot(p1_ex, p1_in, p1_exin)
-    gp.plot(p1_ex, p2)
+    gp.plot(p1_ex, p2_ex, p2)
     # gp2 = Gnuplot.Gnuplot(persist=1)
     # gp2.plot(p1v_ex, p1v_in)
     gp3 = Gnuplot.Gnuplot(persist=1)

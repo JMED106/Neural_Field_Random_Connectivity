@@ -149,6 +149,11 @@ Simulation:
     default:     False
     name:        "<initconds>"
     choices:     [False ,True]
+  -ext --external:
+    description: "Load external custom point."
+    default:     None
+    name:        "<ext_cond>"
+    choices:     ~
   -oic --overrideic:
     description: "Override initial conditions generator."
     default:     False
@@ -193,6 +198,11 @@ Simulation:
     description: "Preliminary plotting with gnuplot."
     default:     False
     name:        "<gplot>"
+    choices:     [True, False]
+  -rast --raster:
+    description: "Saving raster plot."
+    default:     False
+    name:        "<raster>"
     choices:     [True, False]
   -Frq --freqAnalysis:
     description: "Frequency analysis.."
