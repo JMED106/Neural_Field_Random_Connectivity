@@ -11,7 +11,7 @@ import progressbar as pb
 import numpy as np
 from nflib import Data, FiringRate, Connectivity
 from tools import qifint, TheoreticalComputations, SaveResults, Perturbation, noise, FrequencySpectrum, ColorPlot, \
-    LinearStability
+    LinearStability, decay
 
 import Gnuplot
 
@@ -160,7 +160,7 @@ temps = 0
 nois = 0.0
 noise_v = 0.0
 kp = k = 0
-freq = 0.0
+freq = 5
 # Time loop
 while temps < d.tfinal:
     # Time step variables
@@ -196,7 +196,7 @@ while temps < d.tfinal:
         tskp = tstep % d.spiketime
         tsk = (tstep + d.spiketime - 1) % d.spiketime
         # We compute the Mean-field vector s_j
-        s = (1.0 / d.N) * np.dot(c.cnt_ex, np.dot(d.auxMat, np.dot(d.spikes, d.a_tau[:, tsyp])))
+        s = (1.0 / d.N) * np.dot(c.cnt, np.dot(d.auxMat, np.dot(d.spikes, d.a_tau[:, tsyp])))
 
         # Another perturbation (directly changing mean potentials)
         for pert in p:
@@ -254,7 +254,9 @@ while temps < d.tfinal:
                 d.v[k] += args.pD * pert.smod
 
         # We compute the Mean-field vector S ( 1.0/(2.0*pi)*dx = 1.0/l )
-        d.sphi[k2p] = (1.0 / d.l * np.dot(c.cnt_ex, d.r[k]) + 1.0 / d.l * np.dot(c.cnt, d.r[k]))
+        d.sphi[k2p] = 1.0 / d.l * np.dot(c.cnt, d.r[k])
+        # if tstep%100 == 0:
+        #     logger.debug("Mean synaptic input: %s" % d.sphi[k2p])
         # -- Integration -- #
         d.r[kp] = d.r[k] + d.dt * (d.delta / pi + 2.0 * d.r[k] * d.v[k])
         d.v[kp] = d.v[k] + d.dt * (d.v[k] ** 2 + d.eta0 + d.sphi[k2p] - pi2 * d.r[k] ** 2 + d.it[kp])
@@ -283,19 +285,28 @@ temps -= d.dt
 # th.thdist = th.theor_distrb(d.sphi[kp])
 
 # Frequency analysis
+envelopes = []
 envelope = {}
 if args.Frq:
     plot = ColorPlot(data=d)
-    phi = d.l / 2
-    F.analyze(d.r[:, phi] - d.r0, 0.0, d.tfinal, d.faketau, method='all')
-    F.analyze(plot.filter(d.r - d.r0)[:, phi], 0.0, d.tfinal, d.faketau, method='all')
+    F.analyze(d.r.mean(axis=1) - d.r0, 0.0, d.tfinal, d.faketau, method='all', plotting=False)
+    for phi in xrange(d.l):
+        F.analyze(d.r[:, phi] - d.r0, 0.0, d.tfinal, d.faketau, method='all', plotting=False)
+        F.analyze(plot.filter(d.r - d.r0)[:, phi], 0.0, d.tfinal, d.faketau, method='all', plotting=False)
     for pert in p:
         if pert.ptype == 'oscillatory' or pert.ptype == 'chirp':
-            pop = d.l / 2
-            if 'qif' in d.systems:
-                envelope['qif'] = LinearStability.envelope2extreme(fr.r, fr.tempsfr, tau=d.faketau)
-            if 'nf' in d.systems:
-                envelope['nf'] = LinearStability.envelope2extreme(d.r , d.tpoints, tau=d.faketau)
+            totalenvelope = LinearStability.total_envelope(d.r, d.tpoints, tau=d.faketau)
+            totalenvelope['freqs'] = Perturbation.chirp_freqs(totalenvelope['t'], pert.chirp_t0, pert.fmin, pert.chirp_t1, pert.fmax)
+
+            for pop in xrange(d.l):
+                if 'qif' in d.systems:
+                    envelope['qif'] = LinearStability.envelope2extreme(fr.r, fr.tempsfr, tau=d.faketau)
+                if 'nf' in d.systems:
+                    envelope['nf'] = LinearStability.envelope2extreme(d.r, d.tpoints, tau=d.faketau, pop=pop)
+                    envelope['nf']['freqs'] = Perturbation.chirp_freqs(envelope['nf']['t'], pert.chirp_t0, pert.fmin,
+                                                                       pert.chirp_t1, pert.fmax)
+                envelopes.append(envelope)
+                envelope = {}
 
 # Save initial conditions
 if d.new_ic:
@@ -347,10 +358,16 @@ if args.gpl:
         points = 1
     gpllog.info("Plotting every %d points", points)
     gp = Gnuplot.Gnuplot(persist=1)
-    p1_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r[::points, d.l / 2] / d.faketau],
-                                   with_='lines')
-    p2_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r[::points, d.l / 3] / d.faketau],
-                                   with_='lines')
+    p1 = []
+    for k in xrange(d.l):
+        p1.append(Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r[::points, k] / d.faketau],
+                                         with_='lines'))
+        # decay_time = decay(d.tpoints * d.faketau, d.r[:, k] / d.faketau)
+        # logger.debug("Decay time for population %d is tau_%d = %f" % (k, k, decay_time))
+    # p1_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r[::points, d.l / 2] / d.faketau],
+    #                                with_='lines')
+    # p2_ex = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.r[::points, d.l / 3] / d.faketau],
+    #                                with_='lines')
     if args.s != 'nf':
         p2 = Gnuplot.PlotItems.Data(
             np.c_[np.array(fr.tempsfr) * d.faketau, np.array(fr.r)[::points, d.l / 2] / d.faketau],
@@ -358,12 +375,25 @@ if args.gpl:
     else:
         p2 = Gnuplot.PlotItems.Data(np.c_[d.tpoints[::points] * d.faketau, d.it[::points, d.l / 2] + d.r0 / d.faketau],
                                     with_='lines')
-    # gp.plot(p1_ex, p1_in, p1_exin)
-    gp.plot(p1_ex, p2_ex, p2)
+    # p1.append(p2)
+
+    gp.plot(*p1)
     # gp2 = Gnuplot.Gnuplot(persist=1)
     # gp2.plot(p1v_ex, p1v_in)
-    gp3 = Gnuplot.Gnuplot(persist=1)
-    # gp3.plot(p11_ex, p11_in, p11_exin)
+    for pert in p:
+        if args.Frq and pert.ptype in ('chirp', 'oscillatory'):
+            gp3 = Gnuplot.Gnuplot(persist=1)
+            penvelopes = []
+            for pop in xrange(d.l):
+                penvelopes.append(Gnuplot.PlotItems.Data(np.c_[envelopes[pop]['nf']['freqs'] / d.faketau, envelopes[pop]['nf']['envelope'] / d.faketau], with_='lines'))
+            gp3.plot(*penvelopes)
+
+            gp4 = Gnuplot.Gnuplot(persist=1)
+            ptotalenvelope = Gnuplot.PlotItems.Data(
+                np.c_[totalenvelope['freqs'] / d.faketau, totalenvelope['envelope'] / d.faketau],
+                with_='lines')
+            gp4.plot(ptotalenvelope)
+
     raw_input("Enter to exit ...")
 
     # np.savetxt("p%d.dat" % args.m, np.c_[d.tpoints[::points] * d.faketau, d.r[::points, d.l / 2] / d.faketau])

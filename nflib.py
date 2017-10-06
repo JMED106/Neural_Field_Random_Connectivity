@@ -3,8 +3,12 @@ import psutil
 from scipy import stats, special
 from scipy.fftpack import dct
 from scipy.optimize import fsolve
-
+import networkx as nx
+import threading
+from PyQt4 import QtCore
+import matplotlib.pyplot as plt
 import logging
+
 
 logging.getLogger('nflib').addHandler(logging.NullHandler())
 
@@ -31,6 +35,12 @@ __author__ = 'Jose M. Esnaola Acebes'
         2.4. Linear response of the homogeneous state (requires parameters and initial
              conditions).
 """
+
+
+def plotshow(func, arg):
+    f, ax = plt.subplots()
+    func(arg, ax=ax)
+    plt.show()
 
 
 class Data:
@@ -215,7 +225,7 @@ class Data:
             else:
                 self.r[(self.nsteps - 1) % self.nsteps, :] = r0vec * 1.0
                 self.v[(self.nsteps - 1) % self.nsteps, :] = -self.delta / (2.0 * r0vec * np.pi)
-                self.logger.debug("Stationary firing rate: %f" % self.r0)
+                self.logger.debug("Stationary firing rate: %f" % (self.r0 / self.faketau))
                 self.logger.debug("Stationary mean membrane potential: %f" % (self.v[-1, 0]))  # Check this
 
         if system == 'qif' or system == 'both':
@@ -353,7 +363,7 @@ class Connectivity:
         # Number of points (sample) of the function. It should be the number of populations in the ring.
         self.l = length
         # Connectivity function and spatial coordinates
-        self.cnt_ex = np.zeros((length, length))
+        self.cnt = np.zeros((length, length))
         [i_n, j_n] = np.meshgrid(xrange(length), xrange(length))
         ij = (i_n - j_n) * (2.0 * np.pi / length)
         del i_n, j_n  # Make sure you delete these matrices here !!!
@@ -371,7 +381,7 @@ class Connectivity:
                 self.ji = amplitude
                 self.me = me
                 self.mi = mi
-            self.cnt_ex = self.vonmises(self.je, me, 0.0, mi, coords=ij)
+            self.cnt = self.vonmises(self.je, me, 0.0, mi, coords=ij)
             # Compute eigenmodes
             self.eigenmodes = self.vonmises_modes(self.je, me, self.ji, mi)
             self.eigenvectors = None
@@ -385,7 +395,17 @@ class Connectivity:
                 self.log.debug("Creating custom connectivity %s" % str(fsmodes))
                 fsmodes_ex = list(fsmodes)
                 mode0 = fsmodes[0]
-            self.cnt_ex = self.jcntvty(fsmodes_ex, coords=ij)
+            self.cnt = self.jcntvty(fsmodes_ex, coords=ij)
+            self.log.debug("\n%s" % self.cnt)
+            self.log.debug(np.linalg.eigvals(self.cnt) / length)
+            self.log.debug(np.linalg.eigvalsh(self.cnt) / length)
+            self.log.debug("%f" % (np.linalg.eigvals(self.cnt)[0] / length))
+            self.log.debug("%f" % (np.linalg.eigvalsh(self.cnt)[0] / length))
+            eigenvectors = np.linalg.eig(self.cnt)[1]
+            plt.plot(eigenvectors[0])
+            plt.show()
+            self.log.debug(eigenvectors)
+
             self.eigenmodes = fsmodes
             self.eigenvectors = None
         elif profile == 'uniform':
@@ -409,6 +429,19 @@ class Connectivity:
             jr = fsmodes[0]
             self.cnt, (self.eigenmodes, self.eigenvectors) = self.pecora1998_ex1(length, jc, jr, eta=data.eta0,
                                                                                  delta=data.delta)
+        elif profile == 'laplace':
+            neighbors = 5
+            if length <= neighbors:
+                neighbors = 3
+            self.cnt, self.eigenmodes, self.eigenvectors = self.laplacian(length, neighbors)
+            self.cnt *= data.j0
+            r0 = Connectivity.rtheory(0, data.eta0, data.delta)
+            self.pecora1998_gen(self.eigenmodes, data.j0, r0, data.faketau, data.delta)
+            self.log.debug("\n%s" % self.cnt)
+            for k in xrange(length):
+                if not np.isclose(self.cnt[k].mean(), 0.0):
+                    self.log.warning("Not balanced network, pop %d: %f" % (k, self.cnt[k].mean()))
+            # self.log.debug("Eigenvectors: %s" % self.eigenvectors)
         del ij
 
         # Compute frequencies for the ring model (if data is provided)
@@ -419,6 +452,12 @@ class Connectivity:
             self.freqs = self.frequencies(fsmodes, data, ntype='pecora', n=length, alpha=data.j0)
             self.log.debug(self.freqs)
             np.savetxt("freqs.txt", self.freqs)
+        elif profile in ('laplace'):
+            self.freqs = self.frequencies(self.eigenmodes, data, ntype=profile, n=length, alpha=data.j0)
+            # self.log.debug(self.freqs)
+            np.savetxt("freqs.txt", self.freqs)
+
+
 
     def searchmode(self, mode, amp, me, mi):
         """ Function that creates a Mex-Hat connectivity with a specific amplitude (amp) in a given mode (mode)
@@ -471,7 +510,7 @@ class Connectivity:
         # If a data object (containing all info is given)
         if data is not None:
             eta = data.eta0
-            tau = data.tau
+            tau = data.faketau
             delta = data.delta
             j0 = data.j0
         # If not:
@@ -480,6 +519,9 @@ class Connectivity:
             return None
         if r0 is None:  # We have to compute the firing rate at the stationary state
             if ntype == 'pecora':
+                r0 = Connectivity.rtheory(0, eta, delta)[0]
+                logging.debug("r0: %f" % r0)
+            elif ntype == 'laplace':
                 r0 = Connectivity.rtheory(0, eta, delta)[0]
                 logging.debug("r0: %f" % r0)
             else:
@@ -500,6 +542,13 @@ class Connectivity:
         elif ntype == 'pecora':
             for k in xrange(n):
                 f.append(r0 * np.sqrt(1.0 + 2 * alpha * (np.sin(np.pi * k / n)) ** 2 / (r0 * np.pi ** 2)))
+        elif ntype == 'laplace':
+            for k in xrange(n):
+                # logging.debug(np.sqrt(alpha * modes[k] / (np.pi ** 2 * r0) - 1.0 + 0j))
+                # logging.debug(r0 / tau)
+                f.append(r0 / tau * np.imag(np.sqrt(alpha * modes[k] / (2.0 * np.pi ** 2 * r0) - 1.0 + 0j)))
+                # logging.debug("Frequency %d with structural eigenvalue %f: %f" % (k, modes[k], f[-1]))
+
         return f
 
     @staticmethod
@@ -666,6 +715,76 @@ class Connectivity:
             eigenvectors.append(np.real((1.0 / n) * np.add.reduce(np.diag(np.ones(n)) * j, axis=0)))
 
         return aij, (eigenvalues, eigenvectors)
+
+    @staticmethod
+    def laplacian(nodes, edges, **kwargs):
+        try:
+            G = nx.read_gml('graph_last_%d.gml' % nodes)
+        except:
+            # G = nx.gnm_random_graph(nodes, edges, **kwargs)
+            G = nx.connected_watts_strogatz_graph(nodes, edges, 0.9, **kwargs)
+
+
+        Connectivity.save_cnt(G)
+        # Connectivity.plotgraph(G)
+        plotshow(nx.draw, G)
+        plotshow(nx.draw_circular, G)
+        # L = nx.normalized_laplacian_matrix(G)
+        L = nx.laplacian_matrix(G)
+
+        e = np.linalg.eig(L.A)
+        return np.array(L.A, dtype=float), e[0] / nodes, e[1] / nodes
+
+    def pecora1998_gen(self, gammak, alpha, r0, tau, delta):
+        # Theoretically computed eigenvalues
+        try:
+            if len(r0) >= 1:
+                r0 = r0[0]
+        except:
+            pass
+        v0 = - delta / (2.0*np.pi*r0)
+
+        t_lbd_plus = 2 * v0 + 2.0 * r0 * np.pi * np.sqrt(alpha * gammak / (2.0 * np.pi ** 2 * r0) - 1.0 + 0j)
+        t_lbd_minus = 2 * v0 - 2.0 * r0 * np.pi * np.sqrt(alpha * gammak / (2.0 * np.pi ** 2 * r0) - 1.0 + 0j)
+        t_lbd_plus = np.array(t_lbd_plus)
+        t_lbd_minus = np.array(t_lbd_minus)
+        t_decay = np.real(t_lbd_plus)
+        t_freqs = np.abs(np.imag(t_lbd_plus) / (2.0*np.pi*tau))
+
+        # Numerically computed eingenvalues and eigenvectors
+        jacobian = np.matrix([[2*v0, 2*r0], [-2.0*np.pi**2*r0, 2*v0]])
+        coupling = np.matrix([[0.0, 0.0], [alpha, 0.0]])
+
+        n_lbd = []
+        n_vect = []
+        for k, gamma in enumerate(gammak):
+            A = jacobian + gamma * coupling
+            eigenvalues, eigenvectors = np.linalg.eig(A)
+            logging.info("Mode %d:" % k)
+            logging.debug("Theoretical +:\t%f + %fi" % (t_lbd_plus[k].real, t_lbd_plus[k].imag))
+            logging.debug("Theoretical -:\t%f + %fi" % (t_lbd_minus[k].real, t_lbd_minus[k].imag))
+            logging.debug("Theoretical freq:\t%f Hz" % (t_freqs[k]))
+            for eigenvalue, eigenvector in zip(eigenvalues, eigenvectors):
+                if eigenvalue.real >= 0:
+                    logging.warning("Eigenvalue %d: %f >= 0" % (k, eigenvalue.real))
+                    logging.debug("Numerical:\t%f + %fi" % (eigenvalue.real, eigenvalue.imag))
+                elif eigenvalue.imag >= 0:
+                    n_lbd.append(eigenvalue)
+                    n_vect.append(eigenvector)
+                    logging.debug("Numerical:\t%f + %fi" % (eigenvalue.real, eigenvalue.imag))
+
+        return t_freqs, t_lbd_plus, n_vect
+
+    @staticmethod
+    def plotgraph(graph):
+        f, ax = plt.subplots()
+        nx.draw(graph, ax=ax)
+        plt.show()
+
+
+    @staticmethod
+    def save_cnt(graph):
+        nx.write_gml(graph, "graph_last_%d.gml" % len(graph.nodes()))
 
 
 class FiringRate:

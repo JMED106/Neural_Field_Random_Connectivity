@@ -5,7 +5,7 @@ import logging
 import numba
 import numpy as np
 from scipy.fftpack import fft
-from scipy.signal import argrelextrema, welch, butter, lfilter, chirp, hilbert
+from scipy.signal import argrelextrema, argrelmax, welch, butter, lfilter, chirp, hilbert
 import matplotlib.pyplot as plt
 
 from nflib import Data, Connectivity
@@ -49,7 +49,7 @@ def qifint(v_exit_s1, v, exit0, eta_0, s_0, tiempo, number, dn, dt, tau, vpeak, 
         if t >= exit0[n]:
             d[n, 0] = v[n] + (dt / tau) * (v[n] * v[n] + eta_0[n] + tau * s_0[int(n / dn)])  # Euler integration
             if d[n, 0] >= vpeak:
-                d[n, 1] = t + refr_tau - (tau_peak - 1.0 / d[n, 0])
+                d[n, 1] = t + refr_tau - (tau_peak - tau / d[n, 0])
                 d[n, 2] = 1
                 d[n, 0] = -d[n, 0]
     return d
@@ -89,6 +89,30 @@ def find_nearest(array, value, ret='id'):
     else:
         print "Error in find_nearest."
         return -1
+
+
+def decay(t, tseries, tau=1.0):
+    """ Function to measure the decay time in a exponential decaying time series.
+        A(t) = A0 + A(t0)*exp(-t/tau)
+    """
+
+    a0 = tseries.mean()
+    # logging.debug("Base firing rate: %f" % a0)
+    # Find the extreme points
+    a_arg = argrelextrema(tseries, np.greater)
+    a = tseries[a_arg]
+    ta = t[a_arg]
+
+    at0 = a[0]
+    t0 = ta[0]
+    # logging.debug("First amplitude and time: A(%f) = %f " % (t0, at0))
+    at1 = a[5]
+    t1 = ta[5]
+    # logging.debug("Last amplitude and time: A(%f) = %f " % (t1, at1))
+    delta_t = t1 - t0
+    # logging.debug("Time interval: %f" % delta_t)
+    decay_tau = delta_t / (np.log(at0 / (at1 - a0)))
+    return decay_tau
 
 
 class Perturbation:
@@ -131,8 +155,13 @@ class Perturbation:
         self.tdmod = 1.0
         self.mintd = 0.0
         # Oscillatory forcing:
-        self.chirp = chirp(data.tpoints*data.faketau, 0.0, data.tpoints[-1]*data.faketau, 60.0, phi=-90)
+        self.fmin = 0.0
+        self.fmax = 70.0
+        self.chirp_t0 = data.tpoints[0]
+        self.chirp_t1 = data.tpoints[-1]
+        self.chirp = chirp(data.tpoints * data.faketau, self.fmin, data.tpoints[-1] * data.faketau, self.fmax, phi=-90)
         self.freq = []
+        self.frequencies = self.fmin + (self.fmax - self.fmin) * data.tpoints / data.tpoints[-1]
 
         # Amplitude parameters
         self.ptype = ptype
@@ -218,6 +247,10 @@ class Perturbation:
             tstep = int(temps/self.d.dt)
             self.trmod = self.amp * self.chirp[tstep]
             self.input = self.trmod * self.smod
+
+    @staticmethod
+    def chirp_freqs(tpoints, t0, f0, t1, f1):
+        return f0 + (f1 - f0) * tpoints / t1
 
 
 class SaveResults:
@@ -406,7 +439,7 @@ class FrequencySpectrum:
         pass
 
     @staticmethod
-    def analyze(tdata, t0, t1, tau, method='normal'):
+    def analyze(tdata, t0, t1, tau, method='normal', plotting=False):
         """ This function takes all the time series and performs fft on it."""
         # Data
         num_points = len(tdata)
@@ -444,13 +477,20 @@ class FrequencySpectrum:
         plt.xlim([0, 100])
         plt.ylim([0, np.max(np.array(maxx)*1.1)])
         plt.legend()
-        plt.show()
+        if plotting:
+            plt.show()
+        yf = np.array(yf2[1])
+        tf = np.array(yf2[0])
         # exit(-1)
-        # index_peaks = np.array(argrelextrema(yf, np.greater))
-        # max_peak = np.max(yf[index_peaks])
-        # index_freqs = index_peaks[(yf[index_peaks] >= max_peak / 10.0)]
-        # freqs_rescaled = tf[index_freqs]
-        # freqs = tf[index_freqs] / tau
+        try:
+            index_peaks = np.array(argrelextrema(yf, np.greater))
+            max_peak = np.max(yf[index_peaks])
+            index_freqs = index_peaks[(yf[index_peaks] >= max_peak / 10.0)]
+            freqs_rescaled = tf[index_freqs]
+            freqs = tf[index_freqs] / tau
+            logging.debug('Frequency is: %s' % freqs_rescaled)
+        except:
+            pass
         # return (yf2[0], yf2[1])
 
     @staticmethod
@@ -563,6 +603,35 @@ class LinearStability:
         time = t[extreme]*tau
         amplitude = np.abs(signalpop[extreme])
         return {'envelope': amplitude, 't': time, 'args': extreme}
+
+    @staticmethod
+    def total_envelope(signal, t, tau=None):
+        try:
+            assert len(list(np.shape(signal))) == 2
+        except:
+            logging.warning("Bad format for input matrix signal.")
+            return -1
+        if tau is None:
+            tau = 20E-3
+        # Filter the signal to a baseline
+        plt.cla()
+        l = np.size(signal[0])
+        signal_mean = signal.mean(axis=1)
+        signal_filtered = np.array(signal - np.dot(signal_mean.reshape((len(signal_mean), 1)), np.ones((1, l))))
+        logging.debug("Shape of signal_filtered %s" % str(np.shape(signal_filtered)))
+        total_signal = np.zeros(len(t))
+        for k in xrange(l):
+            total_signal =  np.add(np.abs(signal_filtered[:, k]), total_signal)
+        total_signal /= l
+        conv_num = 8
+        convolved = np.convolve(total_signal, np.ones((100,)) / 100, mode='same')
+        for k in xrange(conv_num):
+            convolved = np.convolve(convolved, np.ones((200,)) / 200, mode='same')
+        mx = argrelmax(convolved)
+        # plt.plot(t[mx], convolved[mx])
+
+        # plt.show()
+        return {'envelope': convolved[mx], 't': t[mx]*tau}
 
 
 class DictToObj(object):

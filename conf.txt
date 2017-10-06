@@ -102,7 +102,7 @@ Network:
     description: "Connectivity matrix style."
     default:     'fs'
     name:        "<cnt>"
-    choices:     ['uniform', 'mex-hat', 'fs', 'pecora1']
+    choices:     ['uniform', 'mex-hat', 'fs', 'pecora1', 'laplace']
   -j --coupling:
     description: "Synaptic coupling strength."
     default:     0.0
